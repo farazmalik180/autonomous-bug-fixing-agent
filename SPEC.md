@@ -1,6 +1,6 @@
-# Autonomous Bug-Fixing Agent — Architecture Spec
+﻿# Autonomous Bug-Fixing Agent â€” Architecture Spec
 
-Status: **DRAFT v0.1 — for review.** No implementation exists yet; every file under `src/` is a stub.
+Status: **DRAFT v0.1 â€” for review.** No implementation exists yet; every file under `src/` is a stub.
 
 ## 1. Goal & Flow
 
@@ -39,7 +39,7 @@ The graph state is a `TypedDict` (LangGraph requirement for reducers). Structure
 | Model | Fields |
 |---|---|
 | `IssueInput` | `title: str`, `body: str`, `url: str \| None`, `number: int \| None`, `repo_path: Path` |
-| `RepoContext` | `tree: str` (truncated listing), `relevant_files: dict[str, str]` (path → content snippet), `test_command: str`, `language: str` |
+| `RepoContext` | `tree: str` (truncated listing), `relevant_files: dict[str, str]` (path â†’ content snippet), `test_command: str`, `language: str` |
 | `ReproTest` | `path: str`, `content: str`, `framework: Literal["pytest"]`, `confirmed_failing: bool` |
 | `FilePatch` | `path: str`, `unified_diff: str` |
 | `FixAttempt` | `iteration: int`, `rationale: str`, `patches: list[FilePatch]`, `result: SandboxResult \| None` |
@@ -121,7 +121,7 @@ def route_after_approval(state) -> Literal["commit_and_pr", "analyze_failure", "
 ```
 
 Invariants (each gets a test):
-1. `iteration` never exceeds `max_iterations` (8). LangGraph `recursion_limit` is additionally set to a safe bound (about 4× nodes × iterations) as a hard backstop.
+1. `iteration` never exceeds `max_iterations` (8). LangGraph `recursion_limit` is additionally set to a safe bound (about 4Ã— nodes Ã— iterations) as a hard backstop.
 2. `commit_and_pr` has exactly one inbound edge: from `human_approval` via `route_after_approval`.
 3. Timeouts and `SandboxResult.timed_out` count as failures, never as passes.
 
@@ -156,7 +156,7 @@ class SandboxError(Exception): ...               # daemon unavailable, image mis
 class DockerSandbox:
     def __init__(self, config: SandboxConfig | None = None, client: DockerClient | None = None): ...
     def start(self, host_repo_path: Path) -> None   # create container, mount working copy
-    def run(self, command: str, timeout_s: int | None = None) -> SandboxResult   # bash -lc
+    def run(self, command: str, timeout_s: int | None = None) -> SandboxResult   # bash -c
     def run_tests(self, test_command: str, timeout_s: int | None = None) -> SandboxResult
     def write_file(self, path: str, content: str) -> None
     def read_file(self, path: str) -> str
@@ -169,7 +169,7 @@ class DockerSandbox:
 Design decisions:
 - **Isolation:** non-root user, `cap_drop=["ALL"]`, `security_opt=["no-new-privileges"]`, memory, CPU and PID limits, network off by default. Dependencies are pre-baked into the image. If a repo needs installs, there is an explicit opt-in `network_disabled=False` setup phase.
 - **Working copy, not the original repo:** the agent works on a `git worktree` or temp copy of the repo and bind-mounts it at `/workspace`. The user's checkout is untouched until approval.
-- **Timeouts:** enforced inside the container with `timeout <n> bash -lc ...`. Exit code 124 maps to `timed_out=True`. This avoids orphaned processes, which a host-side timeout on `exec_run` would leave behind.
+- **Timeouts:** enforced inside the container with `timeout <n> bash -c ...`. Exit code 124 maps to `timed_out=True`. This avoids orphaned processes, which a host-side timeout on `exec_run` would leave behind.
 - **Output cap:** stdout/stderr are tail-truncated to `max_output_bytes` (failures appear at the end of pytest output). The state/prompt layer truncates again to about 4k chars for the LLM.
 - **Cleanup:** the context manager and `stop()` always remove the container, including on exceptions.
 
@@ -187,30 +187,30 @@ Design decisions:
 
 ```
 .
-├── SPEC.md
-├── pyproject.toml
-├── .env.example
-├── .gitignore
-├── src/
-│   ├── agent/
-│   │   ├── state.py        # models + AgentState                (phase 1)
-│   │   ├── graph.py        # build_graph, routers, checkpointer  (phase 3)
-│   │   ├── nodes.py        # node functions + pruner              (phase 3)
-│   │   └── prompts.py      # system / task prompts                (phase 3)
-│   ├── sandbox/
-│   │   ├── docker_runner.py   # DockerSandbox                     (phase 1)
-│   │   └── Dockerfile         # python:3.12-slim + pytest, non-root user
-│   └── tools/
-│       ├── file_tools.py   # read/list/grep/apply_patch, path-jail  (phase 2)
-│       └── git_tools.py    # branch/commit/push/PR                   (phase 2)
-└── tests/
-    ├── conftest.py              # `docker` marker, skip if daemon down
-    ├── unit/
-    │   ├── test_state.py            (phase 1)
-    │   ├── test_docker_runner.py    (phase 1; integration-marked)
-    │   └── test_routing.py          (phase 3)
-    └── fixtures/
-        └── buggy_repo/          # tiny repo with a known bug + expected repro test
+â”œâ”€â”€ SPEC.md
+â”œâ”€â”€ pyproject.toml
+â”œâ”€â”€ .env.example
+â”œâ”€â”€ .gitignore
+â”œâ”€â”€ src/
+â”‚   â”œâ”€â”€ agent/
+â”‚   â”‚   â”œâ”€â”€ state.py        # models + AgentState                (phase 1)
+â”‚   â”‚   â”œâ”€â”€ graph.py        # build_graph, routers, checkpointer  (phase 3)
+â”‚   â”‚   â”œâ”€â”€ nodes.py        # node functions + pruner              (phase 3)
+â”‚   â”‚   â””â”€â”€ prompts.py      # system / task prompts                (phase 3)
+â”‚   â”œâ”€â”€ sandbox/
+â”‚   â”‚   â”œâ”€â”€ docker_runner.py   # DockerSandbox                     (phase 1)
+â”‚   â”‚   â””â”€â”€ Dockerfile         # python:3.12-slim + pytest, non-root user
+â”‚   â””â”€â”€ tools/
+â”‚       â”œâ”€â”€ file_tools.py   # read/list/grep/apply_patch, path-jail  (phase 2)
+â”‚       â””â”€â”€ git_tools.py    # branch/commit/push/PR                   (phase 2)
+â””â”€â”€ tests/
+    â”œâ”€â”€ conftest.py              # `docker` marker, skip if daemon down
+    â”œâ”€â”€ unit/
+    â”‚   â”œâ”€â”€ test_state.py            (phase 1)
+    â”‚   â”œâ”€â”€ test_docker_runner.py    (phase 1; integration-marked)
+    â”‚   â””â”€â”€ test_routing.py          (phase 3)
+    â””â”€â”€ fixtures/
+        â””â”€â”€ buggy_repo/          # tiny repo with a known bug + expected repro test
 ```
 
 ## 8. Phases
@@ -219,6 +219,7 @@ Design decisions:
 2. **Phase 2:** `file_tools.py` (path-jailed to the repo root), `git_tools.py`.
 3. **Phase 3:** `prompts.py`, `nodes.py`, `graph.py`, `llm.py`, routing tests with a fake LLM.
 4. **Phase 4:** End-to-end run against `fixtures/buggy_repo`, CLI entry point, README.
+5. **Phase 5:** Streamlit UI and deployment (section 11). Requires the sandbox backend abstraction (section 10), which is built right after Phase 2.
 
 ## 9. Open Questions for Review
 
@@ -228,3 +229,27 @@ Design decisions:
 4. **Network in the sandbox:** off by default with pre-baked deps. OK, or do you want an install phase with network enabled?
 5. **LLM client:** `langchain-groq` (`ChatGroq`) is assumed over a raw OpenAI-compatible client.
 
+
+## 10. Sandbox Backends (added for Streamlit deployment)
+
+Streamlit Community Cloud has no Docker daemon, so the sandbox becomes pluggable.
+
+- `src/sandbox/base.py`: a `Sandbox` `Protocol` with `start(path)`, `run`, `run_tests`, `write_file`, `read_file`, `stop`, and context-manager support. `SandboxResult` and `SandboxError` move here and are re-exported from `docker_runner.py`, so nothing else changes.
+- `DockerSandbox` (existing): full isolation (section 5). The default for local use and any host with Docker.
+- `LocalSandbox` (`src/sandbox/local_runner.py`): runs commands as subprocesses in the working-copy directory, with the same timeout and tail-truncated output contract.
+  - **Weaker isolation, and the UI says so.** It does not block the network, jail the filesystem, or cap memory.
+  - It scrubs the environment: `GROQ_API_KEY`, `GITHUB_TOKEN`, `DATABASE_URL`, and anything matching `*KEY*`, `*TOKEN*`, `*SECRET*`, so LLM-generated code cannot read secrets (Streamlit secrets are exposed as environment variables).
+  - The directory jail is enforced in `write_file`/`read_file` only. Restrict it to demo-sized repos cloned into a temp directory.
+- `create_sandbox(settings)` picks the backend from `SANDBOX_BACKEND=docker|local|auto`. `auto` uses Docker if the daemon is reachable, otherwise `LocalSandbox` with a logged warning. Nodes depend only on the `Sandbox` protocol.
+- Side benefit: agent nodes and the graph can be tested end to end without Docker.
+
+## 11. Streamlit App (Phase 5)
+
+- **Entry point:** `src/ui/streamlit_app.py`; extra dependency group `ui = ["streamlit"]`.
+- **Inputs:** repo (GitHub URL, cloned to a temp dir with a size cap) and an issue URL or pasted text. The Groq key comes from `st.secrets` or a session-only password field. It is never logged or written to disk.
+- **Run loop:** `graph.stream(..., thread_id=st.session_state.thread_id)`. Each node shows as a step in `st.status`, with the repro test, diffs and sandbox output in expanders.
+- **HITL:** when the graph returns an interrupt, the UI renders the diff and test results with **Approve** and **Reject + feedback** buttons. The click calls `graph.invoke(Command(resume=...), config)`. `commit_and_pr` still runs only after this.
+- **Commit/PR on the cloud:** the default is "download patch / commit message". Pushing a branch and opening a PR is opt-in and uses a user-supplied GitHub token held in session state only.
+- **Persistence:** `MemorySaver` is per process, so state is lost on app restart or sleep. Use `PostgresSaver` (`CHECKPOINTER=postgres`) if runs must survive restarts.
+- **Abuse and cost:** the 8-iteration cap, per-session run limit and token-aware pruning bound Groq usage. A public app should either ask users for their own key or be restricted. A shared key invites quota exhaustion.
+- **Deploy:** the repo needs `requirements.txt` (or `pyproject.toml`) with `streamlit`, secrets set in the Community Cloud UI (`.streamlit/secrets.toml` is gitignored locally), and `SANDBOX_BACKEND=local` there. Free-tier apps have limited RAM and sleep when idle.
