@@ -1,6 +1,6 @@
-﻿# Autonomous Bug-Fixing Agent â€” Architecture Spec
+﻿# Autonomous Bug-Fixing Agent Ã¢â‚¬â€ Architecture Spec
 
-Status: **DRAFT v0.1 â€” for review.** No implementation exists yet; every file under `src/` is a stub.
+Status: **DRAFT v0.1 Ã¢â‚¬â€ for review.** No implementation exists yet; every file under `src/` is a stub.
 
 ## 1. Goal & Flow
 
@@ -39,7 +39,7 @@ The graph state is a `TypedDict` (LangGraph requirement for reducers). Structure
 | Model | Fields |
 |---|---|
 | `IssueInput` | `title: str`, `body: str`, `url: str \| None`, `number: int \| None`, `repo_path: Path` |
-| `RepoContext` | `tree: str` (truncated listing), `relevant_files: dict[str, str]` (path â†’ content snippet), `test_command: str`, `language: str` |
+| `RepoContext` | `tree: str` (truncated listing), `relevant_files: dict[str, str]` (path Ã¢â€ â€™ content snippet), `test_command: str`, `language: str` |
 | `ReproTest` | `path: str`, `content: str`, `framework: Literal["pytest"]`, `confirmed_failing: bool` |
 | `FilePatch` | `path: str`, `unified_diff: str` |
 | `FixAttempt` | `iteration: int`, `rationale: str`, `patches: list[FilePatch]`, `result: SandboxResult \| None` |
@@ -58,7 +58,7 @@ class AgentState(TypedDict, total=False):
     issue: IssueInput
     repo: RepoContext
     repro_test: ReproTest
-    attempts: Annotated[list[FixAttempt], operator.add]   # append-only history
+    attempts: Annotated[list[FixAttempt], merge_attempts] # history, upserted by iteration
     messages: Annotated[list[AnyMessage], add_messages]   # LLM conversation (pruned)
     iteration: int            # fix iterations consumed (0..max_iterations)
     repro_attempts: int       # repro-test generations consumed
@@ -73,7 +73,7 @@ class AgentState(TypedDict, total=False):
 
 Rules:
 - Nodes return **partial updates only**; they never mutate the input state.
-- `attempts` is full history for the audit trail. The LLM never sees it raw; the pruner builds a compact summary (section 6).
+- `attempts` is full history for the audit trail. Its reducer `merge_attempts` upserts by `iteration`, so `run_tests` can return an updated copy of the latest attempt with its `SandboxResult` attached (a plain append reducer cannot update an entry). The LLM never sees it raw; the pruner builds a compact summary (section 6).
 - `messages` is the only field the pruner rewrites.
 
 ## 3. Node Functions (`src/agent/nodes.py`)
@@ -121,7 +121,7 @@ def route_after_approval(state) -> Literal["commit_and_pr", "analyze_failure", "
 ```
 
 Invariants (each gets a test):
-1. `iteration` never exceeds `max_iterations` (8). LangGraph `recursion_limit` is additionally set to a safe bound (about 4Ã— nodes Ã— iterations) as a hard backstop.
+1. `iteration` never exceeds `max_iterations` (8). LangGraph `recursion_limit` is additionally set to a safe bound (about 4Ãƒâ€” nodes Ãƒâ€” iterations) as a hard backstop.
 2. `commit_and_pr` has exactly one inbound edge: from `human_approval` via `route_after_approval`.
 3. Timeouts and `SandboxResult.timed_out` count as failures, never as passes.
 
@@ -187,30 +187,30 @@ Design decisions:
 
 ```
 .
-â”œâ”€â”€ SPEC.md
-â”œâ”€â”€ pyproject.toml
-â”œâ”€â”€ .env.example
-â”œâ”€â”€ .gitignore
-â”œâ”€â”€ src/
-â”‚   â”œâ”€â”€ agent/
-â”‚   â”‚   â”œâ”€â”€ state.py        # models + AgentState                (phase 1)
-â”‚   â”‚   â”œâ”€â”€ graph.py        # build_graph, routers, checkpointer  (phase 3)
-â”‚   â”‚   â”œâ”€â”€ nodes.py        # node functions + pruner              (phase 3)
-â”‚   â”‚   â””â”€â”€ prompts.py      # system / task prompts                (phase 3)
-â”‚   â”œâ”€â”€ sandbox/
-â”‚   â”‚   â”œâ”€â”€ docker_runner.py   # DockerSandbox                     (phase 1)
-â”‚   â”‚   â””â”€â”€ Dockerfile         # python:3.12-slim + pytest, non-root user
-â”‚   â””â”€â”€ tools/
-â”‚       â”œâ”€â”€ file_tools.py   # read/list/grep/apply_patch, path-jail  (phase 2)
-â”‚       â””â”€â”€ git_tools.py    # branch/commit/push/PR                   (phase 2)
-â””â”€â”€ tests/
-    â”œâ”€â”€ conftest.py              # `docker` marker, skip if daemon down
-    â”œâ”€â”€ unit/
-    â”‚   â”œâ”€â”€ test_state.py            (phase 1)
-    â”‚   â”œâ”€â”€ test_docker_runner.py    (phase 1; integration-marked)
-    â”‚   â””â”€â”€ test_routing.py          (phase 3)
-    â””â”€â”€ fixtures/
-        â””â”€â”€ buggy_repo/          # tiny repo with a known bug + expected repro test
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ SPEC.md
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ pyproject.toml
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ .env.example
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ .gitignore
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ src/
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ agent/
+Ã¢â€â€š   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ state.py        # models + AgentState                (phase 1)
+Ã¢â€â€š   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ graph.py        # build_graph, routers, checkpointer  (phase 3)
+Ã¢â€â€š   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ nodes.py        # node functions + pruner              (phase 3)
+Ã¢â€â€š   Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ prompts.py      # system / task prompts                (phase 3)
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ sandbox/
+Ã¢â€â€š   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ docker_runner.py   # DockerSandbox                     (phase 1)
+Ã¢â€â€š   Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ Dockerfile         # python:3.12-slim + pytest, non-root user
+Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ tools/
+Ã¢â€â€š       Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ file_tools.py   # read/list/grep/apply_patch, path-jail  (phase 2)
+Ã¢â€â€š       Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ git_tools.py    # branch/commit/push/PR                   (phase 2)
+Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ tests/
+    Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ conftest.py              # `docker` marker, skip if daemon down
+    Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ unit/
+    Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ test_state.py            (phase 1)
+    Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ test_docker_runner.py    (phase 1; integration-marked)
+    Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ test_routing.py          (phase 3)
+    Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ fixtures/
+        Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ buggy_repo/          # tiny repo with a known bug + expected repro test
 ```
 
 ## 8. Phases

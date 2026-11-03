@@ -7,7 +7,6 @@ See SPEC.md section 2.
 
 from __future__ import annotations
 
-import operator
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -31,6 +30,7 @@ __all__ = [
     "RunBudget",
     "SandboxResult",
     "initial_state",
+    "merge_attempts",
 ]
 
 
@@ -112,13 +112,24 @@ class RunBudget(_Model):
         return self
 
 
+def merge_attempts(existing: list[FixAttempt] | None, new: list[FixAttempt] | None) -> list[FixAttempt]:
+    """Reducer for ``attempts``: upsert by ``iteration``, ordered by iteration.
+
+    Lets a later node (e.g. ``run_tests``) return an updated copy of an attempt
+    with its sandbox result attached, while earlier attempts stay in the history.
+    """
+    merged = {a.iteration: a for a in existing or []}
+    merged.update({a.iteration: a for a in new or []})
+    return [merged[k] for k in sorted(merged)]
+
+
 class AgentState(TypedDict, total=False):
     """Graph state. Nodes return partial updates and never mutate their input."""
 
     issue: IssueInput
     repo: RepoContext
     repro_test: ReproTest
-    attempts: Annotated[list[FixAttempt], operator.add]  # append-only audit trail
+    attempts: Annotated[list[FixAttempt], merge_attempts]  # audit trail, upserted by iteration
     messages: Annotated[list[AnyMessage], add_messages]  # LLM conversation (pruned)
     iteration: int  # fix iterations consumed, 0..budget.max_iterations
     repro_attempts: int  # repro-test generations consumed

@@ -38,8 +38,9 @@ src/
   agent/     state.py (done) · graph.py · nodes.py · prompts.py
   sandbox/   docker_runner.py (done) · Dockerfile
   tools/     file_tools.py · git_tools.py
+  ui/        streamlit_app.py · mock_graph.py (scripted demo)
 tests/
-  unit/      test_state.py · test_docker_runner.py · test_routing.py
+  unit/      test_state.py · test_docker_runner.py · test_mock_graph.py · test_streamlit_app.py · test_routing.py
   fixtures/  buggy_repo/
 SPEC.md
 ```
@@ -59,6 +60,15 @@ Build the sandbox image (the test suite also builds it automatically if missing)
 
 ```bash
 docker build -t bugfix-agent-sandbox:latest src/sandbox
+```
+
+## Demo UI (scripted agent)
+
+A Streamlit demo shows the workflow end to end: step-by-step progress, a failed first fix that is retried, and a real LangGraph `interrupt()` that pauses for Approve / Request changes / Reject. **The agent behind it is scripted** (no LLM, no Docker, nothing is committed), so it demonstrates the control flow and the human-approval gate, not real bug fixing.
+
+```bash
+pip install -e ".[ui]"
+streamlit run src/ui/streamlit_app.py
 ```
 
 ## Running the tests
@@ -85,3 +95,4 @@ Tests marked `docker` execute real containers and are **skipped automatically** 
 - [ ] **Phase 2:** `file_tools.py` (path-jailed) and `git_tools.py`
 - [ ] **Phase 3:** prompts, nodes, graph, Groq client with backoff and pruning, routing tests
 - [ ] **Phase 4:** end-to-end run on `tests/fixtures/buggy_repo`, CLI, demo
+
