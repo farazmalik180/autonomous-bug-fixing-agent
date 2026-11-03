@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import posixpath
 import tarfile
 import time
@@ -25,9 +26,23 @@ from types import TracebackType
 from typing import Any
 
 import docker
+from docker.context import ContextAPI
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from docker.types import Mount
 from pydantic import BaseModel, Field
+
+from sandbox.base import SandboxError, SandboxResult, tail_truncate
+
+__all__ = [
+    "DEFAULT_IMAGE",
+    "DockerSandbox",
+    "SandboxConfig",
+    "SandboxError",
+    "SandboxResult",
+    "build_image",
+    "docker_client",
+    "tail_truncate",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +53,6 @@ DOCKERFILE_DIR = Path(__file__).resolve().parent
 _TIMEOUT_EXIT = 124  # command timed out (SIGTERM honoured)
 _KILLED_EXIT = 137  # SIGKILL (-k grace expired); 128 + 9
 _KILL_GRACE_S = 2
-
-
-class SandboxError(Exception):
-    """Infrastructure failure: daemon unreachable, image missing, container gone."""
 
 
 class SandboxConfig(BaseModel):
@@ -59,32 +70,22 @@ class SandboxConfig(BaseModel):
     uid: int = 1000  # must match the uid of `user` in the image
 
 
-class SandboxResult(BaseModel):
-    """Outcome of one command executed in the sandbox."""
+def docker_client() -> docker.DockerClient:
+    """Create a client for the *active Docker context*.
 
-    exit_code: int
-    stdout: str
-    stderr: str
-    timed_out: bool = False
-    duration_s: float = 0.0
-    truncated: bool = False
-
-    @property
-    def passed(self) -> bool:
-        """True only for a clean exit. A timeout is never a pass."""
-        return self.exit_code == 0 and not self.timed_out
-
-
-def tail_truncate(data: bytes, limit: int) -> tuple[str, bool]:
-    """Decode ``data``, keeping the last ``limit`` bytes (failures print last).
-
-    Returns ``(text, was_truncated)``. A marker line is prepended on truncation.
+    ``docker.from_env()`` alone only knows ``DOCKER_HOST`` / the default pipe. Docker
+    Desktop on Windows uses the ``desktop-linux`` context (a different pipe), so we
+    resolve the current context when ``DOCKER_HOST`` is not set.
     """
-    if len(data) <= limit:
-        return data.decode("utf-8", errors="replace"), False
-    dropped = len(data) - limit
-    tail = data[-limit:].decode("utf-8", errors="replace")
-    return f"[... truncated {dropped} bytes ...]\n{tail}", True
+    if not os.environ.get("DOCKER_HOST"):
+        try:
+            ctx = ContextAPI.get_current_context()
+            host = getattr(ctx, "Host", None)
+            if ctx is not None and host and ctx.Name != "default":
+                return docker.DockerClient(base_url=host)
+        except Exception:  # noqa: BLE001 - fall back to environment-based discovery
+            logger.debug("could not resolve docker context", exc_info=True)
+    return docker.from_env()
 
 
 def build_image(
@@ -102,7 +103,7 @@ def build_image(
 
 def _connect() -> docker.DockerClient:
     try:
-        client = docker.from_env()
+        client = docker_client()
         client.ping()
         return client
     except DockerException as exc:
@@ -111,6 +112,9 @@ def _connect() -> docker.DockerClient:
 
 class DockerSandbox:
     """Isolated command runner backed by one Docker container."""
+
+    name = "docker"
+    isolated = True
 
     def __init__(
         self,
@@ -127,10 +131,11 @@ class DockerSandbox:
     def is_available() -> bool:
         """True if the Docker daemon is reachable."""
         try:
-            docker.from_env().ping()
+            docker_client().ping()
             return True
         except Exception:  # noqa: BLE001 - any failure means "not available"
             return False
+
 
     @property
     def client(self) -> docker.DockerClient:

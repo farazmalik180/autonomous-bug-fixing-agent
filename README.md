@@ -1,10 +1,8 @@
 # Autonomous Bug-Fixing Agent
 
-An agent that takes a GitHub issue or bug description, inspects a local repository, writes a reproduction test, runs it in an isolated Docker container, iterates on a fix until the test passes, and **pauses for human approval** before committing or opening a PR.
+An autonomous Python bug-fixing agent orchestrated with **LangGraph** and powered by **Groq**. It ingests a GitHub issue or bug report, inspects a repository, writes a failing `pytest` reproduction test, executes tests in an isolated sandbox, iterates on search/replace code fixes (up to 8 attempts), and **pauses for human-in-the-loop approval** before committing or exporting a patch.
 
-> **Status: early development.** The architecture is specified and the state schema and Docker sandbox runner are implemented. The LangGraph nodes, graph, LLM client and git tools are still stubs. See [Roadmap](#roadmap).
-
-## How it works
+## How It Works
 
 ```mermaid
 flowchart TD
@@ -20,79 +18,86 @@ flowchart TD
     H -->|reject + feedback| I
 ```
 
-The full design (state schema, node contracts, routing rules and sandbox interface) is in [SPEC.md](SPEC.md).
+The full architecture specification is in [SPEC.md](SPEC.md).
 
-## Design highlights
+## Key Features
 
-- **Orchestration:** LangGraph with explicit state typing: a `TypedDict` for graph state and Pydantic v2 models for nested objects.
-- **LLM:** Groq `llama-3.3-70b-versatile` via `langchain-groq`.
-- **Free-tier guardrails:** `tenacity` exponential backoff on 429s, a hard cap of 8 fix iterations, and context pruning before every LLM call.
-- **Sandbox:** one long-lived Docker container per run. It runs as a non-root user with all capabilities dropped, memory, CPU and PID limits, and the network disabled. Timeouts are enforced inside the container and output is tail-truncated.
-- **Human-in-the-loop:** `commit_and_pr` is reachable only through the `human_approval` node, which uses LangGraph's `interrupt()`.
-- **Checkpointing:** `MemorySaver` for development, with `PostgresSaver` planned.
+- **LangGraph Orchestration ([src/agent/graph.py](src/agent/graph.py), [src/agent/state.py](src/agent/state.py)):** Explicit `TypedDict` state with Pydantic v2 sub-models, pure conditional edge routers, and `MemorySaver` / `PostgresSaver` checkpointing.
+- **Groq Free-Tier Guardrails ([src/agent/llm.py](src/agent/llm.py), [src/agent/prompts.py](src/agent/prompts.py)):**
+  - `tenacity` exponential backoff for 429 rate-limit and transient API errors.
+  - Hard cap of 8 fix iterations (`RunBudget`).
+  - Active context pruning (`summarize_past_attempts`) and tail-truncated sandbox outputs to stay well under Groq's 8K tokens/min free tier.
+  - Structured JSON output validation with automatic repair.
+- **Pluggable Sandbox ([src/sandbox/](src/sandbox/)):**
+  - `DockerSandbox` ([src/sandbox/docker_runner.py](src/sandbox/docker_runner.py)): Locked-down container (non-root user, `cap_drop=["ALL"]`, memory/CPU/PID limits, network disabled).
+  - `LocalSandbox` ([src/sandbox/local_runner.py](src/sandbox/local_runner.py)): Subprocess fallback for environments without a Docker daemon (e.g., Streamlit Community Cloud), with environment secret scrubbing and process-tree timeout kills.
+- **Path-Jailed Workspace ([src/tools/file_tools.py](src/tools/file_tools.py)):** Works on an isolated copy (`base/` + `work/`) so your target repository is never modified until approval. Supports built-in sample repos, local folders, or shallow-cloning any GitHub repository URL.
+- **Human-in-the-Loop Gate ([src/agent/nodes.py](src/agent/nodes.py)):** `commit_and_pr` is reachable **only** after `human_approval` resumes from `langgraph.types.interrupt()`.
 
-## Project layout
+## Project Layout
 
 ```
 src/
-  agent/     state.py (done) · graph.py · nodes.py · prompts.py
-  sandbox/   docker_runner.py (done) · Dockerfile
+  agent/     state.py · llm.py · prompts.py · nodes.py · graph.py
+  sandbox/   base.py · docker_runner.py · local_runner.py · factory.py · Dockerfile
   tools/     file_tools.py · git_tools.py
-  ui/        streamlit_app.py · mock_graph.py (scripted demo)
+  ui/        streamlit_app.py · mock_graph.py
 tests/
-  unit/      test_state.py · test_docker_runner.py · test_mock_graph.py · test_streamlit_app.py · test_routing.py
+  unit/      test_state.py · test_docker_runner.py · test_routing.py · test_mock_graph.py · test_streamlit_app.py
   fixtures/  buggy_repo/
 SPEC.md
+requirements.txt
+pyproject.toml
 ```
 
-## Getting started
-
-Requirements: Python 3.11+ and Docker (a running daemon is needed for the sandbox tests).
+## Getting Started
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # Linux/macOS: source .venv/bin/activate
-pip install -e ".[dev]"
-copy .env.example .env                # then set GROQ_API_KEY
+pip install -e ".[dev,ui]"
+copy .env.example .env                # Set GROQ_API_KEY in .env
 ```
 
-Build the sandbox image (the test suite also builds it automatically if missing):
+Optional — build the Docker sandbox image if running with Docker:
 
 ```bash
 docker build -t bugfix-agent-sandbox:latest src/sandbox
 ```
 
-## Demo UI (scripted agent)
-
-A Streamlit demo shows the workflow end to end: step-by-step progress, a failed first fix that is retried, and a real LangGraph `interrupt()` that pauses for Approve / Request changes / Reject. **The agent behind it is scripted** (no LLM, no Docker, nothing is committed), so it demonstrates the control flow and the human-approval gate, not real bug fixing.
+## Running the Streamlit Web App
 
 ```bash
-pip install -e ".[ui]"
 streamlit run src/ui/streamlit_app.py
 ```
 
-## Running the tests
+In the sidebar you can:
+1. Choose **Live Groq Agent** or **Scripted Demo (no API calls)**.
+2. Select a repository source (**Built-in sample buggy repo**, **Local folder path**, or **GitHub URL (shallow clone)**).
+3. Enter the bug title & description, then click **▶️ Start run**.
+4. Review the generated reproduction test, unified diff, and pytest output when the agent pauses at `human_approval`, then click **Approve**, **Request changes**, or **Reject**.
+
+### Deploying to Streamlit Community Cloud
+1. Push this repository to GitHub.
+2. In [share.streamlit.io](https://share.streamlit.io), create a new app pointing to `src/ui/streamlit_app.py`.
+3. Under **App settings → Secrets**, add:
+   ```toml
+   GROQ_API_KEY = "gsk_..."
+   SANDBOX_BACKEND = "local"
+   ```
+
+## Running the Tests
 
 ```bash
 pytest
 ```
 
-Tests marked `docker` execute real containers and are **skipped automatically** when no Docker daemon is reachable. All other tests run without Docker.
-
-## Configuration
-
-| Variable | Purpose |
-|---|---|
-| `GROQ_API_KEY` | Groq API key. Keep it in `.env`, which is gitignored; never commit it. |
-| `GROQ_MODEL` | Defaults to `llama-3.3-70b-versatile`. |
-| `CHECKPOINTER` | `memory` (default) or `postgres`. |
-| `DATABASE_URL` | Postgres connection string when `CHECKPOINTER=postgres`. |
+Tests marked `docker` execute real containers and are **skipped automatically** when no Docker daemon is reachable.
 
 ## Roadmap
 
-- [x] **Phase 0:** SPEC and scaffold
-- [x] **Phase 1:** `state.py` and `docker_runner.py` with unit tests (container tests pending a first run against a live Docker daemon)
-- [ ] **Phase 2:** `file_tools.py` (path-jailed) and `git_tools.py`
-- [ ] **Phase 3:** prompts, nodes, graph, Groq client with backoff and pruning, routing tests
-- [ ] **Phase 4:** end-to-end run on `tests/fixtures/buggy_repo`, CLI, demo
-
+- [x] **Phase 0:** Architecture specification (`SPEC.md`) & project scaffolding
+- [x] **Phase 1:** `state.py` & `docker_runner.py` with unit tests
+- [x] **Phase 2:** Path-jailed `file_tools.py`, `git_tools.py`, and `local_runner.py`
+- [x] **Phase 3:** Groq client (`llm.py`), context pruner (`prompts.py`), LangGraph `nodes.py` & `graph.py`
+- [x] **Phase 4 & 5:** End-to-end verification on `tests/fixtures/buggy_repo` & interactive Streamlit UI

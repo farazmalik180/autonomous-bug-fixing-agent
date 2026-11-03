@@ -16,12 +16,13 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from sandbox.docker_runner import SandboxResult
+from sandbox.base import SandboxResult
 
 __all__ = [
     "AgentState",
     "AgentStatus",
     "ApprovalDecision",
+    "FileEdit",
     "FilePatch",
     "FixAttempt",
     "IssueInput",
@@ -76,7 +77,17 @@ class ReproTest(_Model):
     confirmed_failing: bool = False
 
 
+class FileEdit(_Model):
+    """One search/replace edit proposed by the LLM (far more reliable than raw diffs)."""
+
+    path: str = Field(min_length=1)  # repo-relative
+    search: str = Field(min_length=1)  # must match exactly once in the file
+    replace: str
+
+
 class FilePatch(_Model):
+    """A unified diff (relative to the pristine baseline) computed from applied edits."""
+
     path: str = Field(min_length=1)  # repo-relative
     unified_diff: str = Field(min_length=1)
 
@@ -84,8 +95,9 @@ class FilePatch(_Model):
 class FixAttempt(_Model):
     iteration: int = Field(ge=1)
     rationale: str = ""
-    patches: list[FilePatch] = Field(default_factory=list)
-    patch_error: str | None = None  # set by apply_fix when a diff fails to apply
+    edits: list[FileEdit] = Field(default_factory=list)  # proposed by the LLM
+    patches: list[FilePatch] = Field(default_factory=list)  # set by apply_fix
+    patch_error: str | None = None  # set by apply_fix when an edit does not apply
     result: SandboxResult | None = None  # set by run_tests
 
 
@@ -97,12 +109,12 @@ class ApprovalDecision(_Model):
 
 
 class RunBudget(_Model):
-    """Hard limits that keep a run inside Groq's free tier."""
+    """Hard limits that keep a run inside Groq's free tier (8K tokens/min)."""
 
     max_iterations: int = Field(default=8, ge=1, le=8)
     max_repro_attempts: int = Field(default=2, ge=1)
-    max_context_tokens: int = Field(default=6000, ge=500)
-    max_tool_output_chars: int = Field(default=4000, ge=200)
+    max_context_tokens: int = Field(default=3500, ge=500)  # prompt budget per LLM call
+    max_tool_output_chars: int = Field(default=2500, ge=200)
 
     @model_validator(mode="after")
     def _output_fits_context(self) -> RunBudget:
@@ -129,6 +141,9 @@ class AgentState(TypedDict, total=False):
     issue: IssueInput
     repo: RepoContext
     repro_test: ReproTest
+    repro_result: SandboxResult | None  # last run of the repro test
+    workspace_root: str  # temp dir holding the baseline + working copies
+    diagnosis: str | None  # failure summary / reviewer feedback fed into the next attempt
     attempts: Annotated[list[FixAttempt], merge_attempts]  # audit trail, upserted by iteration
     messages: Annotated[list[AnyMessage], add_messages]  # LLM conversation (pruned)
     iteration: int  # fix iterations consumed, 0..budget.max_iterations
