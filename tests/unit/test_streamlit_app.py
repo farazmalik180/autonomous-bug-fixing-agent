@@ -64,7 +64,7 @@ def test_request_changes_requires_feedback_then_loops_back():
     assert any("Add feedback" in w.value for w in at.warning)
     assert any("Waiting for your approval" in s for s in _subheaders(at))
 
-    at.text_area[1].set_value("handle the empty list")
+    at.text_area(key="fb-2").set_value("handle the empty list")
     _button(at, "Request changes").click()
     at.run()
     assert not at.exception

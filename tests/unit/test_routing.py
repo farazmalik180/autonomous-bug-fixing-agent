@@ -34,7 +34,13 @@ from agent.state import (
     initial_state,
 )
 from sandbox.local_runner import LocalSandbox, scrubbed_env
-from tools.file_tools import EditError, PathEscapeError, Workspace, validate_repro_path
+from tools.file_tools import (
+    EditError,
+    PathEscapeError,
+    Workspace,
+    create_repo_from_uploads,
+    validate_repro_path,
+)
 
 FIXTURE_REPO = Path(__file__).resolve().parents[1] / "fixtures" / "buggy_repo"
 
@@ -152,7 +158,7 @@ def test_workspace_jails_paths_and_applies_edits():
         with pytest.raises(PathEscapeError):
             ws.resolve("../outside.py")
         with pytest.raises(PathEscapeError):
-            validate_repro_path("not_a_test.py")
+            validate_repro_path("calc.py")
 
         ws.apply_edits(
             [
@@ -172,6 +178,31 @@ def test_workspace_jails_paths_and_applies_edits():
         assert ws.diff("calc.py") == ""
     finally:
         ws.cleanup()
+
+
+def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
+    import io
+    import shutil
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("myrepo-main/calc.py", "def add(a, b):\n    return a - b\n")
+        zf.writestr("myrepo-main/sub/util.py", "X = 1\n")
+
+    repo_dir = create_repo_from_uploads([("myrepo.zip", buf.getvalue())])
+    try:
+        assert (repo_dir / "calc.py").is_file()
+        assert (repo_dir / "sub" / "util.py").is_file()
+    finally:
+        shutil.rmtree(repo_dir, ignore_errors=True)
+
+    # Zip-slip attempt must raise PathEscapeError
+    bad_buf = io.BytesIO()
+    with zipfile.ZipFile(bad_buf, "w") as zf:
+        zf.writestr("../../evil.py", "print('pwned')\n")
+    with pytest.raises(PathEscapeError):
+        create_repo_from_uploads([("evil.zip", bad_buf.getvalue())])
 
 
 def test_local_sandbox_scrubs_secrets_and_runs_pytest(tmp_path: Path):

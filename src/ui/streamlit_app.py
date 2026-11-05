@@ -23,7 +23,12 @@ from agent.graph import build_graph
 from agent.llm import AVAILABLE_GROQ_MODELS, load_dotenv_into_environ, resolve_groq_model
 from agent.state import AgentState, FixAttempt, IssueInput, initial_state
 from sandbox.docker_runner import DockerSandbox
-from tools.file_tools import Workspace, WorkspaceError, clone_repo_to_temp
+from tools.file_tools import (
+    Workspace,
+    WorkspaceError,
+    clone_repo_to_temp,
+    create_repo_from_uploads,
+)
 from ui.mock_graph import (
     DEMO_ISSUE_BODY,
     DEMO_ISSUE_TITLE,
@@ -102,6 +107,7 @@ def start_run(
     mode: str,
     repo_source: str,
     repo_input: str,
+    uploaded_files: list[tuple[str, bytes]] | None = None,
     issue_title: str,
     issue_body: str,
 ) -> None:
@@ -118,6 +124,8 @@ def start_run(
     try:
         if repo_source == "Built-in sample buggy repo":
             target_path = FIXTURE_REPO
+        elif repo_source == "Upload .zip or .py files":
+            target_path = create_repo_from_uploads(uploaded_files or [])
         elif repo_source == "GitHub URL (shallow clone)":
             with st.spinner(f"Cloning {repo_input.strip()}..."):
                 target_path = clone_repo_to_temp(repo_input)
@@ -283,13 +291,25 @@ def main() -> None:
             "Repository source",
             options=[
                 "Built-in sample buggy repo",
+                "Upload .zip or .py files",
                 "Local folder path",
                 "GitHub URL (shallow clone)",
             ],
             disabled=is_demo_choice,
         )
         repo_input = ""
-        if repo_source == "Local folder path":
+        uploaded_payloads: list[tuple[str, bytes]] = []
+        if repo_source == "Upload .zip or .py files":
+            uploads = st.file_uploader(
+                "Upload repository (.zip) or Python files (.py)",
+                type=["zip", "py", "toml", "txt", "cfg", "ini", "md"],
+                accept_multiple_files=True,
+                disabled=is_demo_choice,
+            )
+            if uploads:
+                uploaded_payloads = [(u.name, u.getvalue()) for u in uploads]
+                st.caption(f"{len(uploaded_payloads)} file(s) staged for upload")
+        elif repo_source == "Local folder path":
             repo_input = st.text_input(
                 "Local repository path",
                 value=str(FIXTURE_REPO),
@@ -347,6 +367,7 @@ def main() -> None:
                 mode="demo" if is_demo_choice else "live",
                 repo_source=repo_source,
                 repo_input=repo_input,
+                uploaded_files=uploaded_payloads,
                 issue_title=issue_title,
                 issue_body=issue_body,
             )

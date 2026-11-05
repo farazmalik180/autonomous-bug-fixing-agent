@@ -10,12 +10,14 @@ from the LLM go through :meth:`Workspace.resolve`, which rejects anything outsid
 from __future__ import annotations
 
 import difflib
+import io
 import os
 import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Iterable, Iterator
+import zipfile
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path, PurePosixPath
 
 from agent.state import FileEdit
@@ -74,6 +76,77 @@ def clone_repo_to_temp(repo_url: str, timeout_s: int = 90) -> Path:
         )
         if res.returncode != 0:
             raise WorkspaceError(f"git clone failed: {res.stderr.strip() or res.stdout.strip()}")
+        return tmp_dir
+    except Exception:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+
+
+def create_repo_from_uploads(uploaded_files: Sequence[ tuple[str, bytes]]) -> Path:
+    """Build a temporary repository directory from uploaded `.zip` archives or source files.
+
+    - Safe against Zip-Slip (`..` or absolute paths inside archives are rejected).
+    - Automatically strips a single common top-level wrapper folder in `.zip` archives
+      (e.g. GitHub's `repo-main/` zip layout) so imports resolve from the repo root.
+    """
+    if not uploaded_files:
+        raise WorkspaceError("No files uploaded. Please upload a .zip archive or .py files.")
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="bugfix-upload-")).resolve()
+    total_bytes = 0
+    file_count = 0
+
+    try:
+        for raw_name, data in uploaded_files:
+            name = Path(raw_name).name
+            if not name:
+                continue
+            if name.lower().endswith(".zip"):
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    members = [m for m in zf.infolist() if not m.is_dir()]
+                    # Detect if all members share a single top-level directory
+                    top_dirs = {
+                        PurePosixPath(m.filename.replace("\\", "/")).parts[0]
+                        for m in members
+                        if len(PurePosixPath(m.filename.replace("\\", "/")).parts) > 1
+                    }
+                    has_root_files = any(
+                        len(PurePosixPath(m.filename.replace("\\", "/")).parts) == 1
+                        for m in members
+                    )
+                    strip_prefix = len(top_dirs) == 1 and not has_root_files
+
+                    for m in members:
+                        p = PurePosixPath(m.filename.replace("\\", "/"))
+                        if p.is_absolute() or ".." in p.parts:
+                            raise PathEscapeError(f"Unsafe path in zip archive: {m.filename!r}")
+                        parts = p.parts[1:] if strip_prefix else p.parts
+                        if not parts or any(_ignored(part) for part in parts[:-1]):
+                            continue
+                        file_count += 1
+                        total_bytes += m.file_size
+                        if file_count > MAX_FILES or total_bytes > MAX_BYTES:
+                            raise WorkspaceError("Uploaded archive exceeds maximum size/file limit.")
+                        dest = (tmp_dir / Path(*parts)).resolve()
+                        if not dest.is_relative_to(tmp_dir):
+                            raise PathEscapeError(f"Unsafe path in zip archive: {m.filename!r}")
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_bytes(zf.read(m))
+            else:
+                p = PurePosixPath(name.replace("\\", "/"))
+                if p.is_absolute() or ".." in p.parts:
+                    raise PathEscapeError(f"Unsafe uploaded filename: {raw_name!r}")
+                file_count += 1
+                total_bytes += len(data)
+                if file_count > MAX_FILES or total_bytes > MAX_BYTES:
+                    raise WorkspaceError("Uploaded files exceed maximum size/file limit.")
+                dest = (tmp_dir / p.name).resolve()
+                if not dest.is_relative_to(tmp_dir):
+                    raise PathEscapeError(f"Unsafe uploaded filename: {raw_name!r}")
+                dest.write_bytes(data)
+
+        if not any(_walk_files(tmp_dir)):
+            raise WorkspaceError("Uploaded archive/files contained no usable source files.")
         return tmp_dir
     except Exception:
         shutil.rmtree(tmp_dir, ignore_errors=True)
