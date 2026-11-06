@@ -294,14 +294,24 @@ def main() -> None:
     docker_up = DockerSandbox.is_available()
     has_env_key = bool(os.environ.get("GROQ_API_KEY"))
 
+    has_any_key = has_env_key or bool(st.session_state.get("groq_api_key", "").strip())
+
     with st.sidebar:
         st.header("1. Execution Mode")
         mode_choice = st.radio(
             "Agent backend",
             options=["Live Groq Agent", "Scripted Demo (no API calls)"],
-            index=0 if has_env_key else 1,
+            index=0 if has_any_key else 1,
         )
         is_demo_choice = mode_choice.startswith("Scripted")
+        if not is_demo_choice and not has_any_key:
+            st.session_state.groq_api_key = st.text_input(
+                "🔑 Groq API Key (required for Live mode)",
+                value=st.session_state.groq_api_key,
+                type="password",
+                placeholder="gsk_...",
+                help="Or add GROQ_API_KEY in Streamlit Cloud → Manage app → Settings → Secrets.",
+            )
 
         st.header("2. Repository")
         repo_source = st.selectbox(
@@ -421,8 +431,12 @@ def main() -> None:
     for node, update in st.session_state.log:
         render_event(node, update)
 
-    if snap.next:  # paused at human_approval
-        render_approval(snap.tasks[0].interrupts[0].value)
+    interrupt_payload = None
+    if snap.tasks and snap.tasks[0].interrupts:
+        interrupt_payload = snap.tasks[0].interrupts[0].value
+
+    if interrupt_payload is not None:  # paused at human_approval
+        render_approval(interrupt_payload)
     else:
         render_outcome(values)
 
