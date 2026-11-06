@@ -56,8 +56,8 @@ from tools.git_tools import apply_workspace_to_repo
 
 logger = logging.getLogger(__name__)
 
-MAX_RELEVANT_FILES = 6
-MAX_FILE_SNIPPET_CHARS = 3000
+MAX_RELEVANT_FILES = 4
+MAX_FILE_SNIPPET_CHARS = 2200
 
 
 def _get_llm(config: RunnableConfig) -> BaseChatModel:

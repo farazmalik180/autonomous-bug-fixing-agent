@@ -124,9 +124,9 @@ def create_groq_llm(
     model: str | None = None,
     api_key: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 4096,
+    max_tokens: int = 2048,
 ) -> ChatGroq:
-    """Instantiate `ChatGroq` configured for Groq's free tier."""
+    """Instantiate `ChatGroq` configured for Groq's free tier (8,000 TPM limit)."""
     key = (api_key or default_groq_api_key()).strip()
     if not key:
         raise RuntimeError(
@@ -147,17 +147,30 @@ def _is_retryable_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     if any(k in name for k in ("ratelimit", "timeout", "connection", "apitimeout", "internalserver")):
         return True
-    return any(code in msg for code in ("429", "rate limit", "502", "503", "504", "timed out"))
+    return any(
+        code in msg
+        for code in (
+            "429",
+            "413",
+            "rate limit",
+            "rate_limit_exceeded",
+            "tokens per minute",
+            "502",
+            "503",
+            "504",
+            "timed out",
+        )
+    )
 
 
 @retry(
     retry=retry_if_exception(_is_retryable_error),
-    wait=wait_random_exponential(multiplier=1.5, min=1.0, max=30.0),
-    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(multiplier=2.0, min=2.0, max=40.0),
+    stop=stop_after_attempt(6),
     reraise=True,
 )
 def invoke_with_backoff(llm: BaseChatModel, messages: list[BaseMessage]) -> BaseMessage:
-    """Call ``llm.invoke(messages)`` with tenacity exponential backoff on 429 / transient errors."""
+    """Call ``llm.invoke(messages)`` with tenacity exponential backoff on 429/413 TPM & transient errors."""
     return llm.invoke(messages)
 
 
@@ -204,7 +217,8 @@ def invoke_structured(
         try:
             structured_llm = llm.with_structured_output(schema, method="json_mode")
             schema_hint = json.dumps(schema.model_json_schema(), indent=2)
-            res = structured_llm.invoke(
+            res = invoke_with_backoff(  # type: ignore[arg-type]
+                structured_llm,  # type: ignore[arg-type]
                 [
                     SystemMessage(
                         content=(
@@ -213,8 +227,8 @@ def invoke_structured(
                             f"{schema_hint}"
                         )
                     ),
-                    HumanMessage(content=user_prompt),
-                ]
+                    HumanMessage(content=user_prompt[-10_000:]),
+                ],
             )
             if isinstance(res, schema):
                 return res
