@@ -12,9 +12,15 @@ Run:  streamlit run src/ui/streamlit_app.py
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
+
+# Ensure `src/` is on sys.path when launched directly on Streamlit Community Cloud
+_SRC_DIR = str(Path(__file__).resolve().parents[1])
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 import streamlit as st
 from langgraph.types import Command
@@ -35,7 +41,18 @@ from ui.mock_graph import (
     build_mock_graph,
 )
 
+def _load_streamlit_secrets() -> None:
+    """Copy `st.secrets` keys (`GROQ_API_KEY`, `SANDBOX_BACKEND`, etc.) into `os.environ`."""
+    try:
+        for k in ("GROQ_API_KEY", "GROQ_MODEL", "SANDBOX_BACKEND", "CHECKPOINTER", "DATABASE_URL"):
+            if k in st.secrets and not os.environ.get(k):
+                os.environ[k] = str(st.secrets[k])
+    except Exception:  # noqa: BLE001
+        pass
+
+
 load_dotenv_into_environ()
+_load_streamlit_secrets()
 
 FIXTURE_REPO = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "buggy_repo"
 
