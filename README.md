@@ -1,5 +1,9 @@
 # Autonomous Bug-Fixing Agent
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://autonomous-bug-fixing-agent.streamlit.app)
+
+**Live Demo:** [https://autonomous-bug-fixing-agent.streamlit.app](https://autonomous-bug-fixing-agent.streamlit.app)
+
 An autonomous Python bug-fixing agent orchestrated with **LangGraph** and powered by **Groq**. It ingests a GitHub issue or bug report, inspects a repository, writes a failing `pytest` reproduction test, executes tests in an isolated sandbox, iterates on search/replace code fixes (up to 8 attempts), and **pauses for human-in-the-loop approval** before committing or exporting a patch.
 
 ## How It Works
