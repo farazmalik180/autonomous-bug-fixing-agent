@@ -31,6 +31,17 @@ Summarize in 2-3 concise sentences why the latest fix attempt failed (or what th
 requested) and what the next attempt should change.
 """
 
+DETECT_BUG_SYSTEM_PROMPT = """You are a senior Python code auditor.
+Inspect the repository files below and identify ONE concrete, unit-testable bug, edge-case defect,
+or unhandled input error in a pure Python function/class that can be reproduced with a fast,
+standalone `pytest` test (without requiring external API keys, databases, or servers).
+
+Rules:
+- Name the exact module path and function/method in both `title` and `body`.
+- Specify the exact input values, what the code currently does (e.g. wrong return value or
+  unhandled exception), and what it SHOULD return/raise so the test writer and fixer agree.
+"""
+
 
 def summarize_past_attempts(attempts: list[FixAttempt], max_Summary_chars: int = 1200) -> str:
     """Prune past attempts into one-line summaries so context never blows Groq's 8K TPM limit."""

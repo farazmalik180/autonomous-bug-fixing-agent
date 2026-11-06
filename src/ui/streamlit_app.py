@@ -200,6 +200,9 @@ def render_event(node: str, update: dict[str, Any]) -> None:
         with st.expander(f"🧪 {label} (`{update['repro_test'].path}`)", expanded=False):
             st.code(update["repro_test"].content, language="python")
     elif node == "inspect_repo" and "repo" in update:
+        if "issue" in update:
+            det = update["issue"]
+            st.info(f"🔍 **Auto-detected bug in repository:** {det.title}\n\n{det.body}")
         with st.expander(f"🔎 {label}", expanded=False):
             for path, src in update["repo"].relevant_files.items():
                 st.caption(path)
@@ -383,17 +386,29 @@ def main() -> None:
             st.caption(f"Using `{FIXTURE_REPO.name}` (`calc.py` with off-by-one bug)")
 
         st.header("3. Bug Report / Issue")
-        issue_title = st.text_input(
-            "Title",
-            value=DEMO_ISSUE_TITLE,
+        auto_detect_default = repo_source != "Built-in sample buggy repo"
+        auto_detect = st.checkbox(
+            "🔍 Auto-detect bug from repository code",
+            value=auto_detect_default,
             disabled=is_demo_choice,
+            help="When enabled, the Groq LLM inspects the repository first and automatically identifies a testable bug/edge-case to reproduce and fix.",
         )
-        issue_body = st.text_area(
-            "Description",
-            value=DEMO_ISSUE_BODY,
-            height=110,
-            disabled=is_demo_choice,
-        )
+        if auto_detect and not is_demo_choice:
+            issue_title = "Auto-detect bug in repository"
+            issue_body = "Scan repository files, identify a testable bug or edge-case defect, write a failing pytest reproduction test, and fix it."
+            st.caption("Groq will scan the repository files and formulate the bug report automatically.")
+        else:
+            issue_title = st.text_input(
+                "Title",
+                value=DEMO_ISSUE_TITLE,
+                disabled=is_demo_choice,
+            )
+            issue_body = st.text_area(
+                "Description",
+                value=DEMO_ISSUE_BODY,
+                height=110,
+                disabled=is_demo_choice,
+            )
 
         with st.expander("⚙️ LLM & Sandbox Settings", expanded=False):
             model_options = list(AVAILABLE_GROQ_MODELS)

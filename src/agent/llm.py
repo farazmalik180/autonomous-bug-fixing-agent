@@ -68,6 +68,26 @@ class FixProposal(BaseModel):
     )
 
 
+class DetectedBugProposal(BaseModel):
+    """Structured output when auto-scanning a repository for a testable bug."""
+
+    title: str = Field(
+        min_length=3,
+        description="Short issue title naming the file/function and the bug.",
+    )
+    body: str = Field(
+        min_length=10,
+        description=(
+            "Detailed bug description naming the exact module/function, the input that triggers "
+            "the bug, the current wrong behavior, and the expected correct behavior."
+        ),
+    )
+    file_path: str = Field(
+        min_length=1,
+        description="Relative path of the primary Python file containing the bug.",
+    )
+
+
 def load_dotenv_into_environ(dotenv_path: Path | None = None) -> None:
     """Load key=value pairs from `.env` (handling UTF-8 BOM safely) without printing values."""
     candidates = [dotenv_path] if dotenv_path else [Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"]
@@ -93,6 +113,11 @@ def resolve_groq_model(requested: str | None = None) -> str:
     load_dotenv_into_environ()
     raw = (requested or os.environ.get("GROQ_MODEL") or DEFAULT_GROQ_MODEL).strip()
     return DEPRECATED_MODEL_MAP.get(raw, raw)
+
+
+def default_groq_api_key() -> str:
+    load_dotenv_into_environ()
+    return os.environ.get("GROQ_API_KEY", "").strip()
 
 
 def default_groq_api_key() -> str:

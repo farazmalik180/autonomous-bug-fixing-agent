@@ -18,6 +18,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
 from agent.llm import (
+    DetectedBugProposal,
     FixProposal,
     ReproTestProposal,
     create_groq_llm,
@@ -26,6 +27,7 @@ from agent.llm import (
 )
 from agent.prompts import (
     ANALYZE_SYSTEM_PROMPT,
+    DETECT_BUG_SYSTEM_PROMPT,
     FIX_SYSTEM_PROMPT,
     REPRO_SYSTEM_PROMPT,
     build_fix_user_prompt,
@@ -133,7 +135,37 @@ def inspect_repo(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         test_command="pytest -q -p no:cacheprovider",
         language="python",
     )
-    return {"repo": repo, "status": AgentStatus.INSPECTED}
+
+    # If the user left the default calc.py sample issue on a custom repository that has no calc.py,
+    # or requested auto-detection, let the LLM audit the repo and formulate a real testable issue.
+    updates: dict[str, Any] = {"repo": repo, "status": AgentStatus.INSPECTED}
+    has_calc = any(p.endswith("calc.py") for p in py_files)
+    is_default_calc_issue = "average()" in issue.title and "calc.average" in issue.body
+    wants_auto = issue.title.strip().lower().startswith("auto") or (
+        is_default_calc_issue and not has_calc and bool(relevant)
+    )
+    if wants_auto:
+        try:
+            llm = _get_llm(config)
+            files_block = "\n\n".join(
+                f"### File: `{p}`\n```python\n{src}\n```" for p, src in relevant.items()
+            )
+            detected = invoke_structured(
+                llm,
+                DetectedBugProposal,
+                DETECT_BUG_SYSTEM_PROMPT,
+                f"Repository Tree:\n```\n{tree}\n```\n\nSource Files:\n{files_block}",
+            )
+            updates["issue"] = issue.model_copy(
+                update={"title": detected.title, "body": detected.body}
+            )
+            if detected.file_path in py_files and detected.file_path not in relevant:
+                relevant[detected.file_path] = ws.read(
+                    detected.file_path, max_chars=MAX_FILE_SNIPPET_CHARS
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto-detect bug fallback skipped: %s", exc)
+    return updates
 
 
 def write_repro_test(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
