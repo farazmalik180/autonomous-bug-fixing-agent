@@ -79,3 +79,28 @@ def test_reject_escalates():
     at.run()
     assert not at.exception
     assert any("Escalated" in e.value for e in at.error)
+
+
+def test_pdf_report_generation(tmp_path: Path):
+    from agent.state import AgentStatus, FilePatch, FixAttempt, IssueInput, ReproTest, SandboxResult
+    from ui.report_pdf import generate_pdf_report
+
+    values = {
+        "status": AgentStatus.COMMITTED,
+        "iteration": 1,
+        "branch": "agent/fix-issue",
+        "commit_sha": "abc1234",
+        "issue": IssueInput(title="Bug in average()", body="Off by one", repo_path=tmp_path),
+        "repro_test": ReproTest(path="test_repro.py", content="def test_x(): assert False", confirmed_failing=True),
+        "attempts": [
+            FixAttempt(
+                iteration=1,
+                rationale="Fix denominator",
+                patches=[FilePatch(path="calc.py", unified_diff="--- a/calc.py\n+++ b/calc.py\n-bad\n+good\n")],
+                result=SandboxResult(exit_code=0, stdout="1 passed", stderr=""),
+            )
+        ],
+    }
+    pdf_bytes = generate_pdf_report(values)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 500

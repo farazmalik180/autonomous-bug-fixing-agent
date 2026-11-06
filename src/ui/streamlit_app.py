@@ -26,7 +26,12 @@ import streamlit as st
 from langgraph.types import Command
 
 from agent.graph import build_graph
-from agent.llm import AVAILABLE_GROQ_MODELS, load_dotenv_into_environ, resolve_groq_model
+from agent.llm import (
+    AVAILABLE_GROQ_MODELS,
+    default_groq_api_key,
+    load_dotenv_into_environ,
+    resolve_groq_model,
+)
 from agent.state import AgentState, FixAttempt, IssueInput, initial_state
 from sandbox.docker_runner import DockerSandbox
 from tools.file_tools import (
@@ -40,6 +45,7 @@ from ui.mock_graph import (
     DEMO_ISSUE_TITLE,
     build_mock_graph,
 )
+from ui.report_pdf import generate_pdf_report
 
 def _load_streamlit_secrets() -> None:
     """Copy `st.secrets` keys (`GROQ_API_KEY`, `SANDBOX_BACKEND`, etc.) into `os.environ`."""
@@ -216,7 +222,21 @@ def render_event(node: str, update: dict[str, Any]) -> None:
         st.write(f"✅ {label}")
 
 
-def render_approval(payload: dict[str, Any]) -> None:
+def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
+    try:
+        pdf_bytes = generate_pdf_report(values)
+        st.download_button(
+            "📄 Download PDF Bug & Fix Report",
+            data=pdf_bytes,
+            file_name="bugfix-report.pdf",
+            mime="application/pdf",
+            key=f"pdf-{key_suffix}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Could not generate PDF report: {exc}")
+
+
+def render_approval(payload: dict[str, Any], values: dict[str, Any]) -> None:
     st.subheader("⏸️ Waiting for your approval")
     st.caption(
         "The agent is paused by a LangGraph `interrupt()`. "
@@ -228,6 +248,8 @@ def render_approval(payload: dict[str, Any]) -> None:
     st.code(payload["test_output"], language="text")
     with st.expander("Reproduction test"):
         st.code(payload["repro_test"], language="python")
+
+    _render_report_download(values, key_suffix=f"approval-{payload['iteration']}")
 
     feedback = st.text_area(
         "Feedback for the agent (required to request changes)",
@@ -261,7 +283,7 @@ def render_outcome(values: dict[str, Any]) -> None:
         note = "Demo commit" if is_demo else "Approved commit"
         st.success(
             f"{note} `{values['commit_sha']}` on `{values['branch']}` "
-            "(changes kept in the isolated workspace; download the patch below)."
+            "(changes kept in the isolated workspace; download the patch or PDF report below)."
         )
         attempts: list[FixAttempt] = values["attempts"]
         patch = "\n".join(p.unified_diff for p in attempts[-1].patches)
@@ -270,9 +292,19 @@ def render_outcome(values: dict[str, Any]) -> None:
                 patch = Workspace.open(values["workspace_root"]).full_diff() or patch
             except Exception:  # noqa: BLE001
                 pass
-        st.download_button("⬇️ Download patch", patch, file_name="fix.patch")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                "⬇️ Download patch (.patch)",
+                patch,
+                file_name="fix.patch",
+                use_container_width=True,
+            )
+        with col2:
+            _render_report_download(values, key_suffix="committed")
     elif status == "escalated":
         st.error(f"Escalated: {values.get('error')}")
+        _render_report_download(values, key_suffix="escalated")
 
 
 # --------------------------------------------------------------------------- page
@@ -292,8 +324,7 @@ def main() -> None:
     st.title("🐞 Autonomous Bug-Fixing Agent")
 
     docker_up = DockerSandbox.is_available()
-    has_env_key = bool(os.environ.get("GROQ_API_KEY"))
-
+    has_env_key = bool(default_groq_api_key())
     has_any_key = has_env_key or bool(st.session_state.get("groq_api_key", "").strip())
 
     with st.sidebar:
@@ -310,7 +341,7 @@ def main() -> None:
                 value=st.session_state.groq_api_key,
                 type="password",
                 placeholder="gsk_...",
-                help="Or add GROQ_API_KEY in Streamlit Cloud → Manage app → Settings → Secrets.",
+                help="Add GROQ_API_KEY in Streamlit Cloud → Manage app → Settings → Secrets so this box is hidden automatically.",
             )
 
         st.header("2. Repository")
@@ -436,7 +467,7 @@ def main() -> None:
         interrupt_payload = snap.tasks[0].interrupts[0].value
 
     if interrupt_payload is not None:  # paused at human_approval
-        render_approval(interrupt_payload)
+        render_approval(interrupt_payload, values)
     else:
         render_outcome(values)
 

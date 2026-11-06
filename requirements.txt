@@ -5,4 +5,5 @@ pydantic>=2.7
 tenacity>=8.5
 docker>=7.1
 streamlit>=1.40
+fpdf2>=2.7
 pytest>=8.0

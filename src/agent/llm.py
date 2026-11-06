@@ -95,6 +95,11 @@ def resolve_groq_model(requested: str | None = None) -> str:
     return DEPRECATED_MODEL_MAP.get(raw, raw)
 
 
+def default_groq_api_key() -> str:
+    load_dotenv_into_environ()
+    return os.environ.get("GROQ_API_KEY", "").strip()
+
+
 def create_groq_llm(
     model: str | None = None,
     api_key: str | None = None,
@@ -102,8 +107,7 @@ def create_groq_llm(
     max_tokens: int = 1800,
 ) -> ChatGroq:
     """Instantiate `ChatGroq` configured for Groq's free tier."""
-    load_dotenv_into_environ()
-    key = (api_key or os.environ.get("GROQ_API_KEY") or "").strip()
+    key = (api_key or default_groq_api_key()).strip()
     if not key:
         raise RuntimeError(
             "GROQ_API_KEY is not set. Add it to .env or enter it in the Streamlit sidebar."
