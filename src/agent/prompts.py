@@ -11,6 +11,9 @@ that FAILS on the current buggy code and will PASS once the bug is fixed.
 Rules:
 - Import directly from the repository modules shown in the context.
 - Keep the test deterministic, fast, and focused on the exact bug described.
+- If a module reads environment variables or external clients at import time, set dummy env vars
+  (`os.environ.setdefault(...)`) or use `unittest.mock.patch` before importing so the test runs
+  offline without external API keys.
 - Choose a filename like `test_repro_bug.py` in the repository root.
 """
 

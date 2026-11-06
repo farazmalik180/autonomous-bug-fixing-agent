@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
 from tenacity import (
@@ -120,16 +120,11 @@ def default_groq_api_key() -> str:
     return os.environ.get("GROQ_API_KEY", "").strip()
 
 
-def default_groq_api_key() -> str:
-    load_dotenv_into_environ()
-    return os.environ.get("GROQ_API_KEY", "").strip()
-
-
 def create_groq_llm(
     model: str | None = None,
     api_key: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 1800,
+    max_tokens: int = 4096,
 ) -> ChatGroq:
     """Instantiate `ChatGroq` configured for Groq's free tier."""
     key = (api_key or default_groq_api_key()).strip()
@@ -168,7 +163,8 @@ def invoke_with_backoff(llm: BaseChatModel, messages: list[BaseMessage]) -> Base
 
 def _extract_json_object(text: str) -> dict:
     """Extract the first JSON object from an LLM response (stripping <think> tags and fences)."""
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL).strip()
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.DOTALL)
     if fence:
         cleaned = fence.group(1)
@@ -180,6 +176,18 @@ def _extract_json_object(text: str) -> dict:
     return json.loads(cleaned)
 
 
+def _message_text(msg: BaseMessage) -> str:
+    content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+    if content and content.strip():
+        return content
+    # Fallback if reasoning model placed output in additional_kwargs
+    extra = getattr(msg, "additional_kwargs", {}) or {}
+    for k in ("reasoning_content", "content"):
+        if isinstance(extra.get(k), str) and extra[k].strip():
+            return extra[k]
+    return ""
+
+
 def invoke_structured(
     llm: BaseChatModel,
     schema: type[T],
@@ -188,14 +196,38 @@ def invoke_structured(
 ) -> T:
     """Invoke the LLM and parse its output into ``schema`` (Pydantic v2).
 
-    Uses JSON-schema prompting + resilient JSON extraction so it works reliably across
-    `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, and fake test models alike.
+    Uses native `with_structured_output(schema, method="json_mode")` when supported by
+    `ChatGroq` so reasoning models never return empty content, with a resilient manual
+    JSON-extraction + repair fallback for custom/fake test models.
     """
+    if isinstance(llm, ChatGroq):
+        try:
+            structured_llm = llm.with_structured_output(schema, method="json_mode")
+            schema_hint = json.dumps(schema.model_json_schema(), indent=2)
+            res = structured_llm.invoke(
+                [
+                    SystemMessage(
+                        content=(
+                            f"{system_prompt.strip()}\n\n"
+                            "Respond with a valid JSON object matching this schema:\n"
+                            f"{schema_hint}"
+                        )
+                    ),
+                    HumanMessage(content=user_prompt),
+                ]
+            )
+            if isinstance(res, schema):
+                return res
+            if isinstance(res, dict):
+                return schema.model_validate(res)
+        except Exception as native_err:
+            logger.warning("Native json_mode structured output failed (%s); falling back", native_err)
+
     schema_json = json.dumps(schema.model_json_schema(), indent=2)
     full_system = (
         f"{system_prompt.strip()}\n\n"
-        "Respond ONLY with a single valid JSON object matching this JSON schema "
-        "(no markdown prose outside the JSON):\n"
+        "Be concise in internal reasoning. Respond ONLY with a single valid JSON object "
+        "matching this JSON schema (no markdown prose outside the JSON):\n"
         f"{schema_json}"
     )
     messages: list[BaseMessage] = [
@@ -203,7 +235,7 @@ def invoke_structured(
         HumanMessage(content=user_prompt),
     ]
     response = invoke_with_backoff(llm, messages)
-    content = response.content if isinstance(response.content, str) else json.dumps(response.content)
+    content = _message_text(response)
     try:
         data = _extract_json_object(content)
         return schema.model_validate(data)
@@ -211,17 +243,16 @@ def invoke_structured(
         logger.warning("First structured parse failed (%s); asking LLM to repair JSON", first_err)
         repair_messages: list[BaseMessage] = [
             *messages,
-            response,
+            AIMessage(content=content or "{}"),
             HumanMessage(
                 content=(
-                    f"Your response could not be parsed against the schema ({first_err}). "
-                    "Return ONLY the corrected raw JSON object."
+                    f"Your previous response could not be parsed ({first_err}). "
+                    "Do NOT include reasoning or markdown fences. Output ONLY the raw JSON object "
+                    f"with keys {list(schema.model_fields.keys())}."
                 )
             ),
         ]
         repaired = invoke_with_backoff(llm, repair_messages)
-        repaired_text = (
-            repaired.content if isinstance(repaired.content, str) else json.dumps(repaired.content)
-        )
+        repaired_text = _message_text(repaired)
         return schema.model_validate(_extract_json_object(repaired_text))
 
