@@ -40,6 +40,7 @@ from tools.file_tools import (
     clone_repo_to_temp,
     create_repo_from_uploads,
 )
+from tools.git_tools import GitError, create_github_pull_request, parse_github_owner_repo
 from ui.mock_graph import (
     DEMO_ISSUE_BODY,
     DEMO_ISSUE_TITLE,
@@ -152,10 +153,14 @@ def start_run(
         elif repo_source == "GitHub URL (shallow clone)":
             with st.spinner(f"Cloning {repo_input.strip()}..."):
                 target_path = clone_repo_to_temp(repo_input)
+            st.session_state.repo_github_url = repo_input.strip()
         else:
+            st.session_state.repo_github_url = ""
             target_path = Path(repo_input.strip()).expanduser().resolve()
             if not target_path.is_dir():
                 raise WorkspaceError(f"Local folder does not exist: {target_path}")
+        if repo_source != "GitHub URL (shallow clone)":
+            st.session_state.repo_github_url = ""
     except Exception as exc:
         st.session_state.last_error = str(exc)
         return
@@ -239,6 +244,24 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
         st.caption(f"Could not generate PDF report: {exc}")
 
 
+def _render_zip_download(values: dict[str, Any], key_suffix: str) -> None:
+    ws_root = values.get("workspace_root")
+    if not ws_root:
+        return
+    try:
+        zip_bytes = Workspace.open(ws_root).export_zip_bytes()
+        st.download_button(
+            "📦 Download Fixed Repo (.zip)",
+            data=zip_bytes,
+            file_name="fixed-repository.zip",
+            mime="application/zip",
+            key=f"zip-{key_suffix}",
+            use_container_width=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Could not export repository zip: {exc}")
+
+
 def render_approval(payload: dict[str, Any], values: dict[str, Any]) -> None:
     st.subheader("⏸️ Waiting for your approval")
     st.caption(
@@ -252,7 +275,11 @@ def render_approval(payload: dict[str, Any], values: dict[str, Any]) -> None:
     with st.expander("Reproduction test"):
         st.code(payload["repro_test"], language="python")
 
-    _render_report_download(values, key_suffix=f"approval-{payload['iteration']}")
+    dl1, dl2 = st.columns(2)
+    with dl1:
+        _render_report_download(values, key_suffix=f"approval-{payload['iteration']}")
+    with dl2:
+        _render_zip_download(values, key_suffix=f"approval-{payload['iteration']}")
 
     feedback = st.text_area(
         "Feedback for the agent (required to request changes)",
@@ -286,7 +313,8 @@ def render_outcome(values: dict[str, Any]) -> None:
         note = "Demo commit" if is_demo else "Approved commit"
         st.success(
             f"{note} `{values['commit_sha']}` on `{values['branch']}` "
-            "(changes kept in the isolated workspace; download the patch or PDF report below)."
+            "(download the fixed repository `.zip`, unified `.patch`, or PDF report below, "
+            "or push a Pull Request directly to GitHub)."
         )
         attempts: list[FixAttempt] = values["attempts"]
         patch = "\n".join(p.unified_diff for p in attempts[-1].patches)
@@ -295,7 +323,7 @@ def render_outcome(values: dict[str, Any]) -> None:
                 patch = Workspace.open(values["workspace_root"]).full_diff() or patch
             except Exception:  # noqa: BLE001
                 pass
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.download_button(
                 "⬇️ Download patch (.patch)",
@@ -304,7 +332,50 @@ def render_outcome(values: dict[str, Any]) -> None:
                 use_container_width=True,
             )
         with col2:
+            _render_zip_download(values, key_suffix="committed")
+        with col3:
             _render_report_download(values, key_suffix="committed")
+
+        # One-click GitHub Pull Request creation (for live runs)
+        if not is_demo and values.get("workspace_root"):
+            with st.expander("🚀 Push Branch & Open GitHub Pull Request", expanded=bool(st.session_state.get("repo_github_url"))):
+                default_gh_url = st.session_state.get("repo_github_url") or (values.get("issue").url if values.get("issue") else "") or ""
+                gh_url = st.text_input(
+                    "Target GitHub Repository URL",
+                    value=default_gh_url,
+                    placeholder="https://github.com/owner/repo",
+                    key="pr-repo-url",
+                )
+                gh_token = st.text_input(
+                    "GitHub Personal Access Token (`repo` scope — session-only, never stored)",
+                    value=os.environ.get("GITHUB_TOKEN", ""),
+                    type="password",
+                    placeholder="ghp_... or github_pat_...",
+                    key="pr-gh-token",
+                )
+                if st.button("🚀 Create Branch & Open Pull Request on GitHub", type="primary"):
+                    if not parse_github_owner_repo(gh_url):
+                        st.error("Please enter a valid GitHub repository URL (`https://github.com/owner/repo`).")
+                    elif not gh_token.strip():
+                        st.error("Please enter a GitHub Personal Access Token with write access to the repository.")
+                    else:
+                        try:
+                            with st.spinner("Creating branch, committing files, and opening Pull Request..."):
+                                ws = Workspace.open(values["workspace_root"])
+                                issue_obj = values["issue"]
+                                pr_res = create_github_pull_request(
+                                    ws,
+                                    repo_url=gh_url,
+                                    github_token=gh_token,
+                                    issue_title=issue_obj.title,
+                                    issue_body=issue_obj.body,
+                                    rationale=attempts[-1].rationale,
+                                )
+                            st.success(f"🎉 Pull Request opened on `{pr_res.branch}`: {pr_res.pr_url}")
+                            if pr_res.pr_url:
+                                st.link_button("🔗 View Pull Request on GitHub", pr_res.pr_url)
+                        except GitError as exc:
+                            st.error(f"GitHub PR error: {exc}")
     elif status == "escalated":
         st.error(f"Escalated: {values.get('error')}")
         _render_report_download(values, key_suffix="escalated")

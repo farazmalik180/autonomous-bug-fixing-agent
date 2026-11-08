@@ -365,6 +365,16 @@ class Workspace:
     def full_diff(self) -> str:
         return "".join(self.diff(r) for r in self.changed_files())
 
+    def export_zip_bytes(self) -> bytes:
+        """Package the entire fixed working copy (``work/``) into an in-memory ``.zip`` archive."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for rel in _walk_files(self.work):
+                full = self.work / rel
+                if full.is_file():
+                    zf.write(full, arcname=rel.as_posix())
+        return buf.getvalue()
+
 
 def validate_repro_path(rel: str) -> str:
     """Repro tests must be ``test_*.py`` / ``*_test.py`` files; returns the normalized path."""

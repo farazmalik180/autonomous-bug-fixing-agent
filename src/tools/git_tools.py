@@ -1,24 +1,29 @@
-"""Git helpers invoked ONLY after human approval (`commit_and_pr` node).
+"""Git & GitHub PR helpers invoked ONLY after human approval (`commit_and_pr` node or UI).
 
-Copies approved changes back into the target repository (or creates a branch + commit
-if it is a git repository and `apply_to_repo=True`). When running against a temporary
-clone or non-git folder, it generates a deterministic commit SHA and patch bundle
-without touching external remotes unless explicitly asked.
+Supports:
+1. Copying approved changes back into a local repository and creating a branch + commit.
+2. Pushing a fix branch (`agent/fix-...`) and opening a real Pull Request on GitHub via the
+   GitHub REST API using a user-supplied Personal Access Token (`github_token`).
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import re
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+import httpx
 
 from tools.file_tools import Workspace
 
 
 class GitError(Exception):
-    """Git operation failed."""
+    """Git or GitHub API operation failed."""
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,17 @@ class CommitResult:
     commit_sha: str
     pr_url: str | None = None
     applied_to_repo: bool = False
+
+
+def parse_github_owner_repo(repo_url: str) -> tuple[str, str] | None:
+    """Extract `(owner, repo)` from a GitHub HTTPS or SSH URL."""
+    m = re.search(
+        r"github\.com[:/](?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git|/.*)?$",
+        repo_url.strip(),
+    )
+    if not m:
+        return None
+    return m.group("owner"), m.group("repo")
 
 
 def is_git_repo(path: Path) -> bool:
@@ -88,3 +104,114 @@ def apply_workspace_to_repo(
     _git(repo_path, "commit", "-m", commit_message)
     sha = _git(repo_path, "rev-parse", "--short", "HEAD")
     return CommitResult(branch=branch_name, commit_sha=sha, applied_to_repo=True)
+
+
+def create_github_pull_request(
+    ws: Workspace,
+    *,
+    repo_url: str,
+    github_token: str,
+    issue_title: str,
+    issue_body: str,
+    rationale: str,
+    branch_prefix: str = "agent/fix",
+) -> CommitResult:
+    """Create a branch, commit changed files, and open a Pull Request via the GitHub REST API.
+
+    Uses GitHub's Git Data / Contents REST endpoints over HTTPS so it works in cloud
+    containers without needing SSH keys or local git credentials.
+    """
+    parsed = parse_github_owner_repo(repo_url)
+    if not parsed:
+        raise GitError(f"Cannot parse GitHub owner/repo from URL: {repo_url!r}")
+    owner, repo = parsed
+    token = github_token.strip()
+    if not token:
+        raise GitError("A GitHub Personal Access Token (with `repo` or `contents:write` + `pull_requests:write` scope) is required.")
+
+    changed = ws.changed_files()
+    if not changed:
+        raise GitError("No modified files in workspace to commit.")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    base_api = f"https://api.github.com/repos/{owner}/{repo}"
+
+    with httpx.Client(headers=headers, timeout=30.0) as client:
+        # 1. Get default branch name & its HEAD SHA
+        repo_resp = client.get(base_api)
+        if repo_resp.status_code != 200:
+            raise GitError(f"GitHub API error fetching {owner}/{repo}: {repo_resp.text[:200]}")
+        default_branch = repo_resp.json().get("default_branch", "main")
+
+        ref_resp = client.get(f"{base_api}/git/ref/heads/{default_branch}")
+        if ref_resp.status_code != 200:
+            raise GitError(f"Could not read branch {default_branch!r}: {ref_resp.text[:200]}")
+        base_sha = ref_resp.json()["object"]["sha"]
+
+        # 2. Create a new branch ref
+        branch_name = f"{branch_prefix}-{uuid.uuid4().hex[:6]}"
+        create_ref = client.post(
+            f"{base_api}/git/refs",
+            json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
+        )
+        if create_ref.status_code not in (200, 201):
+            raise GitError(
+                f"Could not create branch {branch_name!r} (check token write permissions): "
+                f"{create_ref.text[:200]}"
+            )
+
+        # 3. Commit each modified/new file onto the new branch via Contents API
+        last_commit_sha = base_sha[:7]
+        for rel in changed:
+            full = ws.work / Path(*PurePosixPath(rel).parts)
+            content_b64 = base64.b64encode(full.read_bytes()).decode("ascii")
+
+            existing_sha: str | None = None
+            existing = client.get(f"{base_api}/contents/{rel}", params={"ref": branch_name})
+            if existing.status_code == 200 and isinstance(existing.json(), dict):
+                existing_sha = existing.json().get("sha")
+
+            put_payload: dict[str, str] = {
+                "message": f"Fix: {issue_title} ({rel})",
+                "content": content_b64,
+                "branch": branch_name,
+            }
+            if existing_sha:
+                put_payload["sha"] = existing_sha
+
+            put_resp = client.put(f"{base_api}/contents/{rel}", json=put_payload)
+            if put_resp.status_code not in (200, 201):
+                raise GitError(f"Failed to commit {rel!r}: {put_resp.text[:200]}")
+            last_commit_sha = put_resp.json().get("commit", {}).get("sha", last_commit_sha)[:7]
+
+        # 4. Open the Pull Request
+        pr_body = (
+            f"## Automated Bug Fix\n\n"
+            f"**Issue:** {issue_title}\n\n"
+            f"{issue_body}\n\n"
+            f"### Root-Cause & Fix Rationale\n{rationale}\n\n"
+            f"### Files Changed\n" + "\n".join(f"- `{c}`" for c in changed)
+        )
+        pr_resp = client.post(
+            f"{base_api}/pulls",
+            json={
+                "title": f"Fix: {issue_title}",
+                "head": branch_name,
+                "base": default_branch,
+                "body": pr_body,
+            },
+        )
+        if pr_resp.status_code not in (200, 201):
+            raise GitError(f"Branch {branch_name!r} pushed, but PR creation failed: {pr_resp.text[:200]}")
+
+        pr_url = pr_resp.json().get("html_url")
+        return CommitResult(
+            branch=branch_name,
+            commit_sha=last_commit_sha,
+            pr_url=pr_url,
+            applied_to_repo=True,
+        )

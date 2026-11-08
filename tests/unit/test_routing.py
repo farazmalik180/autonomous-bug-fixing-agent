@@ -176,8 +176,22 @@ def test_workspace_jails_paths_and_applies_edits():
 
         ws.reset()
         assert ws.diff("calc.py") == ""
+
+        zip_bytes = ws.export_zip_bytes()
+        assert len(zip_bytes) > 100
     finally:
         ws.cleanup()
+
+
+def test_parse_github_owner_repo():
+    from tools.git_tools import parse_github_owner_repo
+
+    assert parse_github_owner_repo("https://github.com/farazmalik180/SwiftSupport-Commerce.git") == (
+        "farazmalik180",
+        "SwiftSupport-Commerce",
+    )
+    assert parse_github_owner_repo("https://github.com/owner/repo") == ("owner", "repo")
+    assert parse_github_owner_repo("not-a-url") is None
 
 
 def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
