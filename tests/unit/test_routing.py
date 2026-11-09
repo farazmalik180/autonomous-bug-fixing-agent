@@ -184,7 +184,7 @@ def test_workspace_jails_paths_and_applies_edits():
 
 
 def test_parse_github_owner_repo():
-    from tools.git_tools import parse_github_owner_repo
+    from tools.git_tools import parse_github_issue_url, parse_github_owner_repo
 
     assert parse_github_owner_repo("https://github.com/farazmalik180/SwiftSupport-Commerce.git") == (
         "farazmalik180",
@@ -192,6 +192,13 @@ def test_parse_github_owner_repo():
     )
     assert parse_github_owner_repo("https://github.com/owner/repo") == ("owner", "repo")
     assert parse_github_owner_repo("not-a-url") is None
+
+    assert parse_github_issue_url("https://github.com/farazmalik180/SwiftSupport-Commerce/issues/12") == (
+        "farazmalik180",
+        "SwiftSupport-Commerce",
+        12,
+    )
+    assert parse_github_issue_url("https://github.com/owner/repo") is None
 
 
 def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
