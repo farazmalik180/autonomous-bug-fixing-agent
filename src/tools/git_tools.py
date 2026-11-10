@@ -38,11 +38,12 @@ class CommitResult:
 class GitHubIssueData:
     owner: str
     repo: str
-    number: int
+    number: int | None
     title: str
     body: str
     html_url: str
     repo_clone_url: str
+    auto_detect: bool = False
 
 
 def parse_github_owner_repo(repo_url: str) -> tuple[str, str] | None:
@@ -57,9 +58,9 @@ def parse_github_owner_repo(repo_url: str) -> tuple[str, str] | None:
 
 
 def parse_github_issue_url(issue_url: str) -> tuple[str, str, int] | None:
-    """Extract `(owner, repo, issue_number)` from a GitHub Issue URL."""
+    """Extract `(owner, repo, issue_number)` from a GitHub Issue or PR URL."""
     m = re.search(
-        r"github\.com/(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)/issues/(?P<num>\d+)",
+        r"github\.com/(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)/(?:issues|pull)/(?P<num>\d+)",
         issue_url.strip(),
     )
     if not m:
@@ -68,13 +69,7 @@ def parse_github_issue_url(issue_url: str) -> tuple[str, str, int] | None:
 
 
 def fetch_github_issue(issue_url: str, github_token: str | None = None) -> GitHubIssueData:
-    """Fetch a GitHub issue's title, body, number, and repository URL via the GitHub REST API."""
-    parsed = parse_github_issue_url(issue_url)
-    if not parsed:
-        raise GitError(
-            "Invalid GitHub Issue URL. Expected format: https://github.com/owner/repo/issues/12"
-        )
-    owner, repo, num = parsed
+    """Fetch a GitHub issue by URL, or if given a repo URL, fetch its latest open issue (or fall back to auto-detect)."""
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -82,21 +77,66 @@ def fetch_github_issue(issue_url: str, github_token: str | None = None) -> GitHu
     if github_token and github_token.strip():
         headers["Authorization"] = f"Bearer {github_token.strip()}"
 
-    api_url = f"https://api.github.com/repos/{owner}/{repo}/issues/{num}"
-    with httpx.Client(headers=headers, timeout=20.0) as client:
-        resp = client.get(api_url)
-        if resp.status_code != 200:
-            raise GitError(f"Could not fetch issue #{num} from {owner}/{repo}: {resp.text[:200]}")
-        data = resp.json()
+    parsed = parse_github_issue_url(issue_url)
+    if parsed:
+        owner, repo, num = parsed
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/issues/{num}"
+        with httpx.Client(headers=headers, timeout=20.0) as client:
+            resp = client.get(api_url)
+            if resp.status_code != 200:
+                raise GitError(
+                    f"Could not fetch issue #{num} from {owner}/{repo}: {resp.text[:200]}"
+                )
+            data = resp.json()
 
+        return GitHubIssueData(
+            owner=owner,
+            repo=repo,
+            number=num,
+            title=str(data.get("title") or f"Issue #{num}"),
+            body=str(data.get("body") or ""),
+            html_url=str(data.get("html_url") or issue_url.strip()),
+            repo_clone_url=f"https://github.com/{owner}/{repo}.git",
+            auto_detect=False,
+        )
+
+    # Also support pasting a repository URL (e.g. https://github.com/owner/repo)
+    repo_parsed = parse_github_owner_repo(issue_url)
+    if not repo_parsed:
+        raise GitError(
+            "Invalid GitHub URL. Paste an issue URL (https://github.com/owner/repo/issues/12) "
+            "or a repository URL (https://github.com/owner/repo)."
+        )
+    owner, repo = repo_parsed
+    issues_api = f"https://api.github.com/repos/{owner}/{repo}/issues?state=open&per_page=10"
+    with httpx.Client(headers=headers, timeout=20.0) as client:
+        resp = client.get(issues_api)
+        if resp.status_code == 200 and isinstance(resp.json(), list):
+            open_issues = [item for item in resp.json() if "pull_request" not in item]
+            if open_issues:
+                first = open_issues[0]
+                num = int(first["number"])
+                return GitHubIssueData(
+                    owner=owner,
+                    repo=repo,
+                    number=num,
+                    title=str(first.get("title") or f"Issue #{num}"),
+                    body=str(first.get("body") or ""),
+                    html_url=str(first.get("html_url") or f"https://github.com/{owner}/{repo}/issues/{num}"),
+                    repo_clone_url=f"https://github.com/{owner}/{repo}.git",
+                    auto_detect=False,
+                )
+
+    # Repo has no open issues: configure repo clone URL and enable LLM auto-detect
     return GitHubIssueData(
         owner=owner,
         repo=repo,
-        number=num,
-        title=str(data.get("title") or f"Issue #{num}"),
-        body=str(data.get("body") or ""),
-        html_url=str(data.get("html_url") or issue_url.strip()),
+        number=None,
+        title=f"Auto-detect bug in {owner}/{repo}",
+        body="Scan repository files, identify a testable bug or edge-case defect, write a failing pytest reproduction test, and fix it.",
+        html_url=f"https://github.com/{owner}/{repo}",
         repo_clone_url=f"https://github.com/{owner}/{repo}.git",
+        auto_detect=True,
     )
 
 

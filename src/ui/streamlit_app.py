@@ -530,13 +530,13 @@ def main() -> None:
                 help="Add GROQ_API_KEY in Streamlit Cloud → Manage app → Settings → Secrets so this box is hidden automatically.",
             )
 
-        with st.expander("🎯 Fetch GitHub Issue by URL", expanded=False):
+        with st.expander("🎯 Fetch GitHub Issue / Repo by URL", expanded=False):
             gh_issue_url_input = st.text_input(
-                "GitHub Issue URL",
+                "GitHub Issue or Repo URL",
                 value=st.session_state.fetched_issue_url,
                 placeholder="https://github.com/owner/repo/issues/12",
                 disabled=is_demo_choice,
-                help="Paste a full GitHub issue link to auto-fill the repository URL, issue title, and description.",
+                help="Paste a GitHub Issue URL (.../issues/12) or any Repository URL (https://github.com/owner/repo) to auto-configure the repository and issue.",
             )
             if st.button("📥 Fetch Issue & Repo", use_container_width=True, disabled=is_demo_choice):
                 try:
@@ -544,11 +544,18 @@ def main() -> None:
                     st.session_state.fetched_issue_url = data.html_url
                     st.session_state.fetched_issue_number = data.number
                     st.session_state.fetched_issue_title = data.title
-                    st.session_state.fetched_issue_body = data.body or f"Fix GitHub issue #{data.number}: {data.title}"
+                    st.session_state.fetched_issue_body = (
+                        data.body or f"Fix GitHub issue #{data.number}: {data.title}"
+                    )
                     st.session_state.fetched_repo_url = data.repo_clone_url
                     st.session_state.repo_source_choice = "GitHub URL (shallow clone)"
-                    st.session_state.auto_detect_cb = False
-                    st.success(f"Fetched #{data.number} from `{data.owner}/{data.repo}`")
+                    st.session_state.auto_detect_cb = data.auto_detect
+                    if data.number is not None:
+                        st.success(f"Fetched #{data.number} from `{data.owner}/{data.repo}`")
+                    else:
+                        st.success(
+                            f"Loaded `{data.owner}/{data.repo}` (no open GitHub issues — enabled LLM auto-detect)"
+                        )
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"Could not fetch issue: {exc}")
 
