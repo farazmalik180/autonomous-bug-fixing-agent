@@ -35,11 +35,16 @@ requested) and what the next attempt should change.
 """
 
 DETECT_BUG_SYSTEM_PROMPT = """You are a senior Python code auditor.
-Inspect the repository files below and identify ONE concrete, unit-testable bug, edge-case defect,
-or unhandled input error in a pure Python function/class that can be reproduced with a fast,
-standalone `pytest` test (without requiring external API keys, databases, or servers).
+Scan all repository files below and perform a complete repository audit:
+1. Populate `findings` with ALL concrete bugs, logic errors, unhandled edge cases, reliability
+   defects, and security issues discovered across the repository files (2 to 5 findings, ranked by
+   severity: Critical, High, Medium, Low). For each finding include `severity`, `file_path`,
+   `title`, `description`, and `suggested_fix`.
+2. Choose the single best unit-testable bug in a pure Python function/class (that can be reproduced
+   with a fast standalone `pytest` test without external API keys or servers) and put its details
+   in `title`, `body`, and `file_path`.
 
-Rules:
+Rules for `title` and `body`:
 - Name the exact module path and function/method in both `title` and `body`.
 - Specify the exact input values, what the code currently does (e.g. wrong return value or
   unhandled exception), and what it SHOULD return/raise so the test writer and fixer agree.

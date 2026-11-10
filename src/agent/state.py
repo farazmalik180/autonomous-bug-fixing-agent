@@ -27,6 +27,7 @@ __all__ = [
     "FixAttempt",
     "IssueInput",
     "RepoContext",
+    "RepoFinding",
     "ReproTest",
     "RunBudget",
     "SandboxResult",
@@ -63,9 +64,20 @@ class IssueInput(_Model):
     repo_path: Path
 
 
+class RepoFinding(_Model):
+    """A single bug, defect, or vulnerability discovered during a repository scan."""
+
+    severity: Literal["Critical", "High", "Medium", "Low"] = "High"
+    file_path: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    description: str = ""
+    suggested_fix: str = ""
+
+
 class RepoContext(_Model):
     tree: str = ""  # truncated directory listing
     relevant_files: dict[str, str] = Field(default_factory=dict)  # path -> snippet
+    findings: list[RepoFinding] = Field(default_factory=list)  # all issues discovered in repo
     test_command: str = "pytest -x -q"
     language: str = "python"
 

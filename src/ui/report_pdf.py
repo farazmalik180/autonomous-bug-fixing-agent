@@ -9,7 +9,7 @@ from typing import Any
 
 from fpdf import FPDF
 
-from agent.state import FixAttempt, IssueInput, ReproTest
+from agent.state import FixAttempt, IssueInput, RepoContext, RepoFinding, ReproTest
 
 
 def _latin1(text: str) -> str:
@@ -100,10 +100,31 @@ def generate_pdf_report(values: dict[str, Any]) -> bytes:
             new_y="NEXT",
         )
 
-    # 1. Bug / Issue Summary
+    # 1. Repository Issues Audit (All Issues Found)
+    repo_ctx: RepoContext | None = values.get("repo")
+    findings: list[RepoFinding] = list(repo_ctx.findings) if repo_ctx and repo_ctx.findings else []
+    if findings:
+        _section_heading(pdf, f"1. Repository Issues Audit ({len(findings)} issue(s) found)")
+        for idx, f in enumerate(findings, start=1):
+            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.multi_cell(
+                0,
+                5.5,
+                _latin1(f"Issue #{idx} [{f.severity.upper()}] - {f.file_path}: {f.title}"),
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+            pdf.set_font("Helvetica", "", 9.5)
+            details = f.description or "(no description)"
+            if f.suggested_fix:
+                details += f"\nRecommended Fix: {f.suggested_fix}"
+            pdf.multi_cell(0, 5, _latin1(details), new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1.5)
+
+    # 2. Primary Bug Selected for Automated Reproduction & Fix
     issue: IssueInput | None = values.get("issue")
     if issue is not None:
-        _section_heading(pdf, "1. Reported Bug / Issue")
+        _section_heading(pdf, "2. Primary Issue Selected for Automated Fix")
         pdf.set_font("Helvetica", "B", 11)
         pdf.multi_cell(0, 6, _latin1(f"Title: {issue.title}"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 10)
@@ -115,18 +136,18 @@ def generate_pdf_report(values: dict[str, Any]) -> bytes:
             new_y="NEXT",
         )
 
-    # 2. Reproduction Test
+    # 3. Reproduction Test
     repro: ReproTest | None = values.get("repro_test")
     if repro is not None:
-        _section_heading(pdf, f"2. Reproduction Test ({repro.path})")
+        _section_heading(pdf, f"3. Reproduction Test ({repro.path})")
         pdf.set_font("Helvetica", "", 10)
         repro_status = "Confirmed failing on baseline code" if repro.confirmed_failing else "Not confirmed failing"
         pdf.cell(0, 6, _latin1(f"Reproduction Status: {repro_status}"), new_x="LMARGIN", new_y="NEXT")
         _code_block(pdf, repro.content)
 
-    # 3. Fix Attempts & Unified Diffs
+    # 4. Fix Attempts & Unified Diffs
     attempts: list[FixAttempt] = values.get("attempts") or []
-    _section_heading(pdf, f"3. Fix Iterations & Code Changes ({len(attempts)} attempt(s))")
+    _section_heading(pdf, f"4. Fix Iterations & Code Changes ({len(attempts)} attempt(s))")
     if not attempts:
         pdf.set_font("Helvetica", "I", 10)
         pdf.cell(0, 6, "No fix attempts recorded.", new_x="LMARGIN", new_y="NEXT")

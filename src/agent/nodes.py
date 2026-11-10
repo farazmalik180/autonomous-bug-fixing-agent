@@ -40,6 +40,7 @@ from agent.state import (
     FilePatch,
     FixAttempt,
     RepoContext,
+    RepoFinding,
     ReproTest,
     RunBudget,
     SandboxResult,
@@ -163,8 +164,34 @@ def inspect_repo(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
                 relevant[detected.file_path] = ws.read(
                     detected.file_path, max_chars=MAX_FILE_SNIPPET_CHARS
                 )
+            findings = list(detected.findings) if detected.findings else [
+                RepoFinding(
+                    severity="High",
+                    file_path=detected.file_path,
+                    title=detected.title,
+                    description=detected.body,
+                    suggested_fix="Apply automated search/replace fix verified by pytest.",
+                )
+            ]
+            repo = repo.model_copy(update={"relevant_files": relevant, "findings": findings})
+            updates["repo"] = repo
         except Exception as exc:  # noqa: BLE001
             logger.warning("Auto-detect bug fallback skipped: %s", exc)
+    if not updates["repo"].findings:
+        primary_file = next(iter(relevant.keys()), "repository")
+        updates["repo"] = updates["repo"].model_copy(
+            update={
+                "findings": [
+                    RepoFinding(
+                        severity="High",
+                        file_path=primary_file,
+                        title=updates.get("issue", issue).title,
+                        description=updates.get("issue", issue).body,
+                        suggested_fix="Apply targeted code fix and verify with regression test.",
+                    )
+                ]
+            }
+        )
     return updates
 
 

@@ -22,7 +22,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from agent.state import FileEdit
+from agent.state import FileEdit, RepoFinding
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,11 @@ class FixProposal(BaseModel):
 
 
 class DetectedBugProposal(BaseModel):
-    """Structured output when auto-scanning a repository for a testable bug."""
+    """Structured output when scanning a repository for all issues + a primary testable bug."""
 
     title: str = Field(
         min_length=3,
-        description="Short issue title naming the file/function and the bug.",
+        description="Short issue title naming the file/function and the primary unit-testable bug.",
     )
     body: str = Field(
         min_length=10,
@@ -85,6 +85,10 @@ class DetectedBugProposal(BaseModel):
     file_path: str = Field(
         min_length=1,
         description="Relative path of the primary Python file containing the bug.",
+    )
+    findings: list[RepoFinding] = Field(
+        default_factory=list,
+        description="Complete audit list of all bugs, edge-case flaws, and security/reliability issues found across the repository.",
     )
 
 

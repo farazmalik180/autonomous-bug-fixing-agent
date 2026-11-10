@@ -29,6 +29,7 @@ from agent.state import (
     FilePatch,
     FixAttempt,
     RepoContext,
+    RepoFinding,
     ReproTest,
     SandboxResult,
 )
@@ -109,6 +110,22 @@ def inspect_repo(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     repo = RepoContext(
         tree="calc.py\ntests/\n",
         relevant_files={"calc.py": BUGGY_SOURCE},
+        findings=[
+            RepoFinding(
+                severity="High",
+                file_path="calc.py",
+                title="Off-by-one denominator in average(xs)",
+                description="`return sum(xs) / (len(xs) + 1)` divides by `len(xs) + 1`, returning wrong arithmetic averages for all inputs.",
+                suggested_fix="Replace `(len(xs) + 1)` with `len(xs)`.",
+            ),
+            RepoFinding(
+                severity="Medium",
+                file_path="calc.py",
+                title="Missing empty-sequence validation in average(xs)",
+                description="Calling `average([])` raises an unhandled `ZeroDivisionError` instead of a descriptive `ValueError`.",
+                suggested_fix="Add `if not xs: raise ValueError('average() requires at least one value')`.",
+            ),
+        ],
         test_command="pytest -q -p no:cacheprovider",
     )
     return {"repo": repo, "status": AgentStatus.INSPECTED}
