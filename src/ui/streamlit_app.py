@@ -11,6 +11,7 @@ Run:  streamlit run src/ui/streamlit_app.py
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 import time
@@ -22,6 +23,23 @@ from typing import Any
 _SRC_DIR = str(Path(__file__).resolve().parents[1])
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
+
+# Hot-reload guard for Streamlit Community Cloud: if an older commit's modules are cached
+# in `sys.modules` across a live GitHub push, reload them in dependency order.
+if "agent.state" in sys.modules and not hasattr(sys.modules["agent.state"], "RepoFinding"):
+    for _mod in (
+        "agent.state",
+        "tools.file_tools",
+        "tools.git_tools",
+        "agent.prompts",
+        "agent.llm",
+        "agent.nodes",
+        "agent.graph",
+        "ui.mock_graph",
+        "ui.report_pdf",
+    ):
+        if _mod in sys.modules:
+            importlib.reload(sys.modules[_mod])
 
 import streamlit as st
 from langgraph.types import Command
@@ -86,12 +104,12 @@ STEP_LABELS = {
 
 
 @st.cache_resource
-def get_live_graph():
+def get_live_graph(_version: str = "v3"):
     return build_graph()
 
 
 @st.cache_resource
-def get_demo_graph():
+def get_demo_graph(_version: str = "v3"):
     return build_mock_graph()
 
 
