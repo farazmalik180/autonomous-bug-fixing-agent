@@ -36,6 +36,7 @@ The full architecture specification is in [SPEC.md](SPEC.md).
   - `DockerSandbox` ([src/sandbox/docker_runner.py](src/sandbox/docker_runner.py)): Locked-down container (non-root user, `cap_drop=["ALL"]`, memory/CPU/PID limits, network disabled).
   - `LocalSandbox` ([src/sandbox/local_runner.py](src/sandbox/local_runner.py)): Subprocess fallback for environments without a Docker daemon (e.g., Streamlit Community Cloud), with environment secret scrubbing and process-tree timeout kills.
 - **Path-Jailed Workspace ([src/tools/file_tools.py](src/tools/file_tools.py)):** Works on an isolated copy (`base/` + `work/`) so your target repository is never modified until approval. Supports built-in sample repos, local folders, or shallow-cloning any GitHub repository URL.
+- **Single-URL Repository Audit & PDF Report ([src/ui/streamlit_app.py](src/ui/streamlit_app.py), [src/ui/report_pdf.py](src/ui/report_pdf.py)):** Paste a single GitHub repository URL to scan all files for bugs/defects, view a side-by-side Before/After diff and live telemetry bar, and download a printable PDF audit & fix report.
 - **Human-in-the-Loop Gate ([src/agent/nodes.py](src/agent/nodes.py)):** `commit_and_pr` is reachable **only** after `human_approval` resumes from `langgraph.types.interrupt()`.
 
 ## Project Layout
