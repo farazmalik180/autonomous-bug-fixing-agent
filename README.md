@@ -24,6 +24,15 @@ flowchart TD
 
 The full architecture specification is in [SPEC.md](SPEC.md).
 
+## Core Agent Pillars
+
+| Pillar | Implementation |
+|---|---|
+| **LLM** | Groq (`openai/gpt-oss-120b`) with structured JSON outputs ([`src/agent/llm.py`](src/agent/llm.py)) |
+| **Framework** | LangGraph state machine & conditional edge routers ([`src/agent/graph.py`](src/agent/graph.py)) |
+| **Memory** | `AgentState` + `MemorySaver` / `PostgresSaver` checkpointing ([`src/agent/state.py`](src/agent/state.py)) |
+| **Tools** | Path-jailed Workspace, Git/GitHub REST API & Sandbox test runners ([`src/tools/`](src/tools/), [`src/sandbox/`](src/sandbox/)) |
+
 ## Key Features
 
 - **LangGraph Orchestration ([src/agent/graph.py](src/agent/graph.py), [src/agent/state.py](src/agent/state.py)):** Explicit `TypedDict` state with Pydantic v2 sub-models, pure conditional edge routers, and `MemorySaver` / `PostgresSaver` checkpointing.
