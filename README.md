@@ -55,7 +55,7 @@ src/
   agent/     state.py · llm.py · prompts.py · nodes.py · graph.py
   sandbox/   base.py · docker_runner.py · local_runner.py · factory.py · Dockerfile
   tools/     file_tools.py · git_tools.py
-  ui/        streamlit_app.py · mock_graph.py
+  ui/        streamlit_app.py · mock_graph.py · report_pdf.py
 tests/
   unit/      test_state.py · test_docker_runner.py · test_routing.py · test_mock_graph.py · test_streamlit_app.py
   fixtures/  buggy_repo/
