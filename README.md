@@ -2,7 +2,8 @@
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://autonomous-bug-fixing-agent.streamlit.app)
 
-**Live Demo:** [https://autonomous-bug-fixing-agent.streamlit.app](https://autonomous-bug-fixing-agent.streamlit.app)
+- **Live Demo (AWS EC2):** [http://98.89.45.201](http://98.89.45.201) ([http://98.89.45.201:8501](http://98.89.45.201:8501))
+- **Live Demo (Streamlit Cloud):** [https://autonomous-bug-fixing-agent.streamlit.app](https://autonomous-bug-fixing-agent.streamlit.app)
 
 An autonomous Python bug-fixing agent orchestrated with **LangGraph** and powered by **Groq**. It ingests a GitHub issue or bug report, inspects a repository, writes a failing `pytest` reproduction test, executes tests in an isolated sandbox, iterates on search/replace code fixes (up to 8 attempts), and **pauses for human-in-the-loop approval** before committing or exporting a patch.
 
@@ -90,6 +91,13 @@ In the sidebar you can:
 2. Select a repository source (**Built-in sample buggy repo**, **Local folder path**, or **GitHub URL (shallow clone)**).
 3. Enter the bug title & description, then click **▶️ Start run**.
 4. Review the generated reproduction test, unified diff, and pytest output when the agent pauses at `human_approval`, then click **Approve**, **Request changes**, or **Reject**.
+
+### Deploying to AWS Free Tier (EC2 + Docker)
+Run the one-command bootstrap script in **AWS CloudShell** ([`deploy/cloudshell_deploy.sh`](deploy/cloudshell_deploy.sh)):
+```bash
+curl -sSL https://raw.githubusercontent.com/farazmalik180/autonomous-bug-fixing-agent/main/deploy/cloudshell_deploy.sh | tr -d '\r' | GROQ_API_KEY="gsk_..." bash
+```
+- **Live AWS Instance:** [http://98.89.45.201](http://98.89.45.201) ([http://98.89.45.201:8501](http://98.89.45.201:8501))
 
 ### Deploying to Streamlit Community Cloud
 1. Push this repository to GitHub.
