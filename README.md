@@ -60,9 +60,8 @@ src/
 tests/
   unit/      test_state.py · test_docker_runner.py · test_routing.py · test_mock_graph.py · test_streamlit_app.py
   fixtures/  buggy_repo/
-SPEC.md
-requirements.txt
-pyproject.toml
+deploy/      cloudshell_deploy.sh · ec2_userdata.sh
+Dockerfile · docker-compose.yml · SPEC.md · requirements.txt · pyproject.toml
 ```
 
 ## Getting Started
