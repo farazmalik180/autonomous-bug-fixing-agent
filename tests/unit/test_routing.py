@@ -258,6 +258,27 @@ def test_aws_tools_s3_and_dynamodb_with_mocks(tmp_path: Path):
     assert runs[0]["s3_pdf_url"] == "https://s3.amazonaws.com/bucket/report.pdf"
 
 
+def test_bedrock_converse_chat_model_with_mock():
+    from unittest.mock import MagicMock
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from agent.llm import BedrockConverseChatModel, create_groq_llm
+
+    llm = create_groq_llm(model="bedrock/us.amazon.nova-lite-v1:0")
+    assert isinstance(llm, BedrockConverseChatModel)
+    assert llm.model_id == "us.amazon.nova-lite-v1:0"
+
+    fake_brt = MagicMock()
+    fake_brt.converse.return_value = {
+        "output": {"message": {"content": [{"text": '{"ok": true}'}]}}
+    }
+    llm.client = fake_brt
+    res = llm.invoke([SystemMessage(content="sys"), HumanMessage(content="hi")])
+    assert res.content == '{"ok": true}'
+    fake_brt.converse.assert_called_once()
+
+
 def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
     import io
     import shutil

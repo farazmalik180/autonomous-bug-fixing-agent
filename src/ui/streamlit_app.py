@@ -609,12 +609,12 @@ def main() -> None:
                 else 0
             )
             st.session_state.groq_model = st.selectbox(
-                "Groq Model",
+                "LLM Model (Groq or AWS Bedrock)",
                 options=model_options,
                 index=default_idx,
             )
             st.session_state.groq_api_key = st.text_input(
-                "Groq API Key override (optional if set in .env)",
+                "Groq API Key override (optional if set in .env or using Bedrock)",
                 value=st.session_state.groq_api_key,
                 type="password",
                 placeholder="Using GROQ_API_KEY from .env" if has_env_key else "gsk_...",
@@ -627,9 +627,10 @@ def main() -> None:
             )
             st.slider("Demo step delay (s)", 0.0, 1.5, key="delay", step=0.1)
 
-        if not is_demo_choice and not has_any_key:
+        is_bedrock_model = str(st.session_state.get("groq_model", "")).startswith("bedrock/")
+        if not is_demo_choice and not has_any_key and not is_bedrock_model:
             st.session_state.groq_api_key = st.text_input(
-                "🔑 Groq API Key (required for Live mode)",
+                "🔑 Groq API Key (required for Live Groq mode)",
                 value=st.session_state.groq_api_key,
                 type="password",
                 placeholder="gsk_...",

@@ -9,14 +9,15 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
 from tenacity import (
-     retry,
+    retry,
     retry_if_exception,
     stop_after_attempt,
     wait_random_exponential,
@@ -28,13 +29,15 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-# Default to active Groq models; fall back automatically if llama-3.3-70b-versatile is set
-# in .env from older templates.
+# Default to active Groq models + AWS Bedrock foundation models (via boto3 Converse API).
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 AVAILABLE_GROQ_MODELS = (
     "openai/gpt-oss-120b",
     "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
+    "bedrock/us.amazon.nova-lite-v1:0",
+    "bedrock/us.amazon.nova-pro-v1:0",
+    "bedrock/us.meta.llama3-3-70b-instruct-v1:0",
 )
 DEPRECATED_MODEL_MAP = {
     "llama-3.3-70b-versatile": DEFAULT_GROQ_MODEL,
@@ -124,19 +127,93 @@ def default_groq_api_key() -> str:
     return os.environ.get("GROQ_API_KEY", "").strip()
 
 
+class BedrockConverseChatModel(BaseChatModel):
+    """LangChain `BaseChatModel` adapter for Amazon Bedrock Runtime (`converse` API via `boto3`).
+
+    Works on AWS EC2 using IAM Instance Profile credentials (zero API keys on disk) or locally
+    via standard AWS environment variables.
+    """
+
+    model_id: str = "us.amazon.nova-lite-v1:0"
+    region_name: str = "us-east-1"
+    temperature: float = 0.0
+    max_tokens: int = 2048
+    client: Any | None = None
+
+    @property
+    def _llm_type(self) -> str:
+        return "amazon-bedrock-converse"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        brt = self.client
+        if brt is None:
+            import boto3  # type: ignore[import-untyped]
+
+            brt = boto3.client("bedrock-runtime", region_name=self.region_name)
+
+        system_prompts: list[dict[str, str]] = []
+        converse_msgs: list[dict[str, Any]] = []
+        for m in messages:
+            text = m.content if isinstance(m.content, str) else json.dumps(m.content)
+            if isinstance(m, SystemMessage):
+                system_prompts.append({"text": text})
+            elif isinstance(m, AIMessage):
+                converse_msgs.append({"role": "assistant", "content": [{"text": text}]})
+            else:
+                converse_msgs.append({"role": "user", "content": [{"text": text}]})
+
+        if not converse_msgs:
+            converse_msgs.append({"role": "user", "content": [{"text": "Respond in JSON."}]})
+
+        req: dict[str, Any] = {
+            "modelId": self.model_id,
+            "messages": converse_msgs,
+            "inferenceConfig": {
+                "maxTokens": self.max_tokens,
+                "temperature": self.temperature,
+            },
+        }
+        if system_prompts:
+            req["system"] = system_prompts
+
+        resp = brt.converse(**req)
+        blocks = resp.get("output", {}).get("message", {}).get("content", [])
+        out_text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict))
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=out_text))])
+
+
 def create_groq_llm(
     model: str | None = None,
     api_key: str | None = None,
     temperature: float = 0.0,
     max_tokens: int = 2048,
-) -> ChatGroq:
-    """Instantiate `ChatGroq` configured for Groq's free tier (8,000 TPM limit)."""
+) -> BaseChatModel:
+    """Instantiate `ChatGroq` or `BedrockConverseChatModel` (when model starts with `bedrock/`)."""
+    resolved_model = resolve_groq_model(model)
+    if resolved_model.startswith("bedrock/"):
+        bedrock_id = resolved_model.split("bedrock/", 1)[1]
+        region = (
+            os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        ).strip()
+        return BedrockConverseChatModel(
+            model_id=bedrock_id,
+            region_name=region,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
     key = (api_key or default_groq_api_key()).strip()
     if not key:
         raise RuntimeError(
-            "GROQ_API_KEY is not set. Add it to .env or enter it in the Streamlit sidebar."
+            "GROQ_API_KEY is not set. Add it to .env, enter it in the sidebar, or select a `bedrock/...` model."
         )
-    resolved_model = resolve_groq_model(model)
     return ChatGroq(
         model=resolved_model,
         api_key=key,  # type: ignore[arg-type]
