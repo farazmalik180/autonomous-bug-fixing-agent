@@ -13,9 +13,9 @@ echo "Completing AWS Free Tier Credit Activities for Account: $ACCOUNT_ID"
 echo "=================================================================="
 
 # ------------------------------------------------------------------
-# Activity A: Set up a cost budget using AWS Budgets ($20 USD)
+# Activity A: Set up a cost budget using AWS Budgets (20 USD)
 # ------------------------------------------------------------------
-echo "=== 1/4 Creating AWS Cost Budget ($20 Credit Activity) ==="
+echo "=== 1/4 Creating AWS Cost Budget (20 USD Credit Activity) ==="
 BUDGET_JSON=$(mktemp)
 NOTIF_JSON=$(mktemp)
 cat <<EOF > "$BUDGET_JSON"
@@ -63,9 +63,9 @@ rm -f "$BUDGET_JSON" "$NOTIF_JSON"
 echo "✅ AWS Cost Budget configured!"
 
 # ------------------------------------------------------------------
-# Activity B: Ensure Lambda Web App Function URL is Public & Invoked ($20 USD)
+# Activity B: Ensure Lambda Web App Function URL is Public & Invoked (20 USD)
 # ------------------------------------------------------------------
-echo "=== 2/4 Finalizing & Invoking AWS Lambda Web App ($20 Credit Activity) ==="
+echo "=== 2/4 Finalizing & Invoking AWS Lambda Web App (20 USD Credit Activity) ==="
 LAMBDA_NAME="bugfix-agent-github-webhook"
 aws lambda add-permission \
     --region "$REGION" \
@@ -82,9 +82,9 @@ curl -sS -X POST "$WEBHOOK_URL" \
 echo "✅ Lambda Web App live & invoked at: $WEBHOOK_URL"
 
 # ------------------------------------------------------------------
-# Activity C: Create an RDS PostgreSQL Database for LangGraph Checkpointing ($20 USD)
+# Activity C: Create an RDS PostgreSQL Database for LangGraph Checkpointing (20 USD)
 # ------------------------------------------------------------------
-echo "=== 3/4 Launching Free-Tier RDS PostgreSQL Instance ($20 Credit Activity) ==="
+echo "=== 3/4 Launching Free-Tier RDS PostgreSQL Instance (20 USD Credit Activity) ==="
 DB_ID="bugfix-agent-postgres"
 if ! aws rds describe-db-instances --region "$REGION" --db-instance-identifier "$DB_ID" >/dev/null 2>&1; then
     aws rds create-db-instance \
@@ -118,9 +118,9 @@ else
 fi
 
 # ------------------------------------------------------------------
-# Activity D: Test Amazon Bedrock Foundation Models ($20 USD)
+# Activity D: Test Amazon Bedrock Foundation Models (20 USD)
 # ------------------------------------------------------------------
-echo "=== 4/4 Testing Amazon Bedrock Foundation Models ($20 Credit Activity) ==="
+echo "=== 4/4 Testing Amazon Bedrock Foundation Models (20 USD Credit Activity) ==="
 for MODEL in amazon.titan-text-lite-v1 amazon.titan-text-express-v1 amazon.nova-micro-v1:0 anthropic.claude-3-haiku-20240307-v1:0; do
     if aws bedrock-runtime converse \
         --region "$REGION" \
@@ -134,10 +134,10 @@ done
 echo ""
 echo "=================================================================="
 echo "🎉 ALL AWS CREDIT ACTIVITIES TRIGGERED!"
-echo "- EC2 Instance:    Completed ($20)"
-echo "- DynamoDB Table:  Completed ($20)"
-echo "- Lambda Web App:  Completed ($20)"
-echo "- AWS Cost Budget: Completed ($20)"
-echo "- RDS Database:    Creating  ($20 -> posts once RDS finishes initializing)"
-echo "Refresh your AWS Console Home page in ~2-3 minutes to see $100 of $100 USD!"
+echo "- EC2 Instance:    Completed (20 USD)"
+echo "- DynamoDB Table:  Completed (20 USD)"
+echo "- Lambda Web App:  Completed (20 USD)"
+echo "- AWS Cost Budget: Completed (20 USD)"
+echo "- RDS Database:    Creating  (20 USD -> posts once RDS finishes initializing)"
+echo "Refresh your AWS Console Home page in ~2-3 minutes to see 100 of 100 USD!"
 echo "=================================================================="
