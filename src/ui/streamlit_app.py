@@ -53,6 +53,11 @@ from agent.llm import (
 )
 from agent.state import AgentState, FixAttempt, IssueInput, initial_state
 from sandbox.docker_runner import DockerSandbox
+from tools.aws_tools import (
+    archive_run_to_aws,
+    is_aws_configured,
+    list_runs_from_dynamodb,
+)
 from tools.file_tools import (
     Workspace,
     WorkspaceError,
@@ -76,7 +81,16 @@ from ui.report_pdf import generate_pdf_report
 def _load_streamlit_secrets() -> None:
     """Copy `st.secrets` keys (`GROQ_API_KEY`, `SANDBOX_BACKEND`, etc.) into `os.environ`."""
     try:
-        for k in ("GROQ_API_KEY", "GROQ_MODEL", "SANDBOX_BACKEND", "CHECKPOINTER", "DATABASE_URL"):
+        for k in (
+            "GROQ_API_KEY",
+            "GROQ_MODEL",
+            "SANDBOX_BACKEND",
+            "CHECKPOINTER",
+            "DATABASE_URL",
+            "AWS_S3_BUCKET",
+            "AWS_DYNAMODB_TABLE",
+            "AWS_REGION",
+        ):
             if k in st.secrets and not os.environ.get(k):
                 os.environ[k] = str(st.secrets[k])
     except Exception:  # noqa: BLE001
@@ -278,6 +292,30 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
             mime="application/pdf",
             key=f"pdf-{key_suffix}",
         )
+        if is_aws_configured() and st.session_state.get("thread_id"):
+            archive_key = f"aws_archive_{st.session_state.thread_id}_{values.get('status')}"
+            if archive_key not in st.session_state:
+                zip_bytes = None
+                ws_root = values.get("workspace_root")
+                if ws_root:
+                    try:
+                        zip_bytes = Workspace.open(ws_root).export_zip_bytes()
+                    except Exception:  # noqa: BLE001
+                        zip_bytes = None
+                st.session_state[archive_key] = archive_run_to_aws(
+                    st.session_state.thread_id,
+                    values,
+                    pdf_bytes=pdf_bytes,
+                    zip_bytes=zip_bytes,
+                )
+            arc = st.session_state[archive_key]
+            if arc.s3_pdf_url:
+                st.caption(
+                    f"☁️ Archived to Amazon S3 (`s3://{arc.s3_bucket}/{arc.s3_pdf_key}`) · "
+                    f"[Open S3 Pre-Signed PDF Report]({arc.s3_pdf_url})"
+                )
+            if arc.dynamodb_saved:
+                st.caption("✅ Run metadata persisted to Amazon DynamoDB (`BugFixAgentRuns`)")
     except Exception as exc:  # noqa: BLE001
         st.caption(f"Could not generate PDF report: {exc}")
 
@@ -636,6 +674,21 @@ def main() -> None:
                 issue_url=effective_url,
                 issue_number=effective_num,
             )
+
+        if is_aws_configured():
+            with st.expander("☁️ AWS Cloud History (DynamoDB & S3)", expanded=False):
+                runs = list_runs_from_dynamodb(limit=8)
+                if not runs:
+                    st.caption("No past runs logged in DynamoDB yet.")
+                for r in runs:
+                    st.markdown(
+                        f"**`{r['run_id']}`** · `{r['status']}` ({r['findings_count']} issues)\n\n"
+                        f"<small>{r['issue_title'][:60]}</small>",
+                        unsafe_allow_html=True,
+                    )
+                    if r.get("s3_pdf_url"):
+                        st.markdown(f"[📄 S3 PDF Report]({r['s3_pdf_url']})")
+                    st.divider()
 
     if is_demo_choice:
         st.warning(

@@ -201,6 +201,63 @@ def test_parse_github_owner_repo():
     assert parse_github_issue_url("https://github.com/owner/repo") is None
 
 
+def test_aws_tools_s3_and_dynamodb_with_mocks(tmp_path: Path):
+    from unittest.mock import MagicMock
+
+    from tools.aws_tools import (
+        list_runs_from_dynamodb,
+        save_run_to_dynamodb,
+        upload_bytes_to_s3,
+    )
+
+    fake_s3 = MagicMock()
+    fake_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/bucket/report.pdf"
+    url = upload_bytes_to_s3(
+        b"%PDF-1.4",
+        "reports/run-1/bugfix-report.pdf",
+        "application/pdf",
+        bucket="my-bucket",
+        s3_client=fake_s3,
+    )
+    assert url == "https://s3.amazonaws.com/bucket/report.pdf"
+    fake_s3.put_object.assert_called_once()
+
+    fake_ddb = MagicMock()
+    fake_ddb.scan.return_value = {
+        "Items": [
+            {
+                "run_id": {"S": "live-1234"},
+                "created_at": {"S": "2026-11-17T18:00:00Z"},
+                "repo": {"S": "https://github.com/owner/repo"},
+                "issue_title": {"S": "Bug in average()"},
+                "status": {"S": "committed"},
+                "iterations": {"N": "2"},
+                "findings_count": {"N": "3"},
+                "s3_pdf_url": {"S": "https://s3.amazonaws.com/bucket/report.pdf"},
+            }
+        ]
+    }
+    saved = save_run_to_dynamodb(
+        "live-1234",
+        {
+            "issue": IssueInput(title="Bug in average()", body="desc", repo_path=tmp_path),
+            "status": AgentStatus.COMMITTED,
+            "iteration": 2,
+            "commit_sha": "abc1234",
+        },
+        s3_pdf_url=url,
+        table_name="BugFixAgentRuns",
+        ddb_client=fake_ddb,
+    )
+    assert saved is True
+    fake_ddb.put_item.assert_called_once()
+
+    runs = list_runs_from_dynamodb(limit=5, table_name="BugFixAgentRuns", ddb_client=fake_ddb)
+    assert len(runs) == 1
+    assert runs[0]["run_id"] == "live-1234"
+    assert runs[0]["s3_pdf_url"] == "https://s3.amazonaws.com/bucket/report.pdf"
+
+
 def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
     import io
     import shutil
