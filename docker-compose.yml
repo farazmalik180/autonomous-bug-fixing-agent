@@ -4,9 +4,28 @@ services:
     container_name: autonomous-bug-fixing-agent
     restart: unless-stopped
     ports:
-      - "80:8501"
       - "8501:8501"
     env_file:
       - .env
     environment:
       - SANDBOX_BACKEND=local
+
+  caddy-https:
+    image: caddy:2-alpine
+    container_name: bugfix-agent-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME:-98.89.45.201.nip.io}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bugfix-agent
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,11 @@
+# Caddy Reverse Proxy for Automatic Let's Encrypt HTTPS
+# Defaults to nip.io wildcard DNS for the EC2 IP if DOMAIN_NAME is not set.
+{$DOMAIN_NAME:98.89.45.201.nip.io} {
+    encode gzip
+    reverse_proxy bugfix-agent:8501 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
