@@ -143,6 +143,14 @@ aws lambda add-permission \
     --principal "*" \
     --function-url-auth-type "NONE" >/dev/null 2>&1 || true
 
+aws lambda add-permission \
+    --region "$REGION" \
+    --function-name "$LAMBDA_NAME" \
+    --statement-id "FunctionURLAllowInvokeFunction" \
+    --action "lambda:InvokeFunction" \
+    --principal "*" \
+    --invoked-via-function-url >/dev/null 2>&1 || true
+
 rm -rf "$TMP_DIR"
 
 echo ""

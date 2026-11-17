@@ -105,6 +105,9 @@ curl -sSL https://raw.githubusercontent.com/farazmalik180/autonomous-bug-fixing-
 ```
 - **Live AWS CloudFront HTTPS URL:** [https://d3gctx9v0f6g4u.cloudfront.net](https://d3gctx9v0f6g4u.cloudfront.net)
 - **Live AWS EC2 Direct URL:** [http://98.89.45.201](http://98.89.45.201) ([http://98.89.45.201:8501](http://98.89.45.201:8501))
+- **Live AWS Lambda Webhook URL:** [https://xmo5agqoh4bd7gkxaahbbpiqi40mjqst.lambda-url.us-east-1.on.aws/](https://xmo5agqoh4bd7gkxaahbbpiqi40mjqst.lambda-url.us-east-1.on.aws/)
+- **AWS S3 Archive Bucket:** `s3://bugfix-agent-reports-706999906997-us-east-1`
+- **AWS DynamoDB History Table:** `BugFixAgentRuns`
 
 ### Deploying to Streamlit Community Cloud
 1. Push this repository to GitHub.
