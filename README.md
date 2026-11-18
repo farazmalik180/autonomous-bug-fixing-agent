@@ -14,6 +14,7 @@ short_description: Autonomous Python Bug-Fixing AI Agent (LangGraph + Groq)
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://autonomous-bug-fixing-agent.streamlit.app)
 
 - **Live Demo (AWS CloudFront HTTPS + EC2):** [https://d3gctx9v0f6g4u.cloudfront.net](https://d3gctx9v0f6g4u.cloudfront.net) ([http://98.89.45.201](http://98.89.45.201))
+- **Live Demo (Hugging Face Space):** [https://huggingface.co/spaces/MF180/autonomous-bug-fixing-agent](https://huggingface.co/spaces/MF180/autonomous-bug-fixing-agent) ([HF Repo](https://huggingface.co/MF180/autonomous-bug-fixing-agent))
 - **Live Demo (Streamlit Cloud):** [https://autonomous-bug-fixing-agent.streamlit.app](https://autonomous-bug-fixing-agent.streamlit.app)
 
 An autonomous Python bug-fixing agent orchestrated with **LangGraph** and powered by **Groq**. It ingests a GitHub issue or bug report, inspects a repository, writes a failing `pytest` reproduction test, executes tests in an isolated sandbox, iterates on search/replace code fixes (up to 8 attempts), and **pauses for human-in-the-loop approval** before committing or exporting a patch.
