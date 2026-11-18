@@ -1,3 +1,14 @@
+---
+title: Autonomous Bug-Fixing Agent
+emoji: 🐞
+colorFrom: red
+colorTo: indigo
+sdk: docker
+app_port: 8501
+pinned: false
+short_description: Autonomous Python Bug-Fixing AI Agent (LangGraph + Groq)
+---
+
 # Autonomous Bug-Fixing Agent
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://autonomous-bug-fixing-agent.streamlit.app)
