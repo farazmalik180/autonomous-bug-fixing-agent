@@ -57,6 +57,7 @@ from tools.aws_tools import (
     archive_run_to_aws,
     is_aws_configured,
     list_runs_from_dynamodb,
+    subscribe_email_to_sns,
 )
 from tools.file_tools import (
     Workspace,
@@ -70,6 +71,10 @@ from tools.git_tools import (
     fetch_github_issue,
     parse_github_issue_url,
     parse_github_owner_repo,
+)
+from tools.hf_tools import (
+    default_hf_token,
+    export_run_to_hf_dataset,
 )
 from ui.mock_graph import (
     DEMO_ISSUE_BODY,
@@ -89,7 +94,10 @@ def _load_streamlit_secrets() -> None:
             "DATABASE_URL",
             "AWS_S3_BUCKET",
             "AWS_DYNAMODB_TABLE",
+            "AWS_SNS_TOPIC_ARN",
             "AWS_REGION",
+            "HF_TOKEN",
+            "HF_DATASET_REPO",
         ):
             if k in st.secrets and not os.environ.get(k):
                 os.environ[k] = str(st.secrets[k])
@@ -307,6 +315,7 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
                     values,
                     pdf_bytes=pdf_bytes,
                     zip_bytes=zip_bytes,
+                    elapsed_s=float(st.session_state.get("elapsed_s", 0.0)),
                 )
             arc = st.session_state[archive_key]
             if arc.s3_pdf_url:
@@ -316,6 +325,19 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
                 )
             if arc.dynamodb_saved:
                 st.caption("✅ Run metadata persisted to Amazon DynamoDB (`BugFixAgentRuns`)")
+            if arc.cloudwatch_published:
+                st.caption("📊 Telemetry published to Amazon CloudWatch (`AutonomousBugFixingAgent`)")
+            if arc.sns_published:
+                st.caption("📧 Alert notification sent via Amazon SNS (`BugFixAgentAlerts`)")
+        if default_hf_token() and st.session_state.get("thread_id"):
+            hf_key = f"hf_dataset_{st.session_state.thread_id}_{values.get('status')}"
+            if hf_key not in st.session_state:
+                st.session_state[hf_key] = export_run_to_hf_dataset(
+                    st.session_state.thread_id, values
+                )
+            hf_url = st.session_state[hf_key]
+            if hf_url:
+                st.caption(f"🤗 Benchmark published to Hugging Face Dataset: [{hf_url}]({hf_url})")
     except Exception as exc:  # noqa: BLE001
         st.caption(f"Could not generate PDF report: {exc}")
 
@@ -627,8 +649,10 @@ def main() -> None:
             )
             st.slider("Demo step delay (s)", 0.0, 1.5, key="delay", step=0.1)
 
-        is_bedrock_model = str(st.session_state.get("groq_model", "")).startswith("bedrock/")
-        if not is_demo_choice and not has_any_key and not is_bedrock_model:
+        is_alt_provider = str(st.session_state.get("groq_model", "")).startswith(
+            ("bedrock/", "hf/")
+        )
+        if not is_demo_choice and not has_any_key and not is_alt_provider:
             st.session_state.groq_api_key = st.text_input(
                 "🔑 Groq API Key (required for Live Groq mode)",
                 value=st.session_state.groq_api_key,
@@ -677,7 +701,20 @@ def main() -> None:
             )
 
         if is_aws_configured():
-            with st.expander("☁️ AWS Cloud History (DynamoDB & S3)", expanded=False):
+            with st.expander("☁️ AWS Cloud History & SNS Alerts", expanded=False):
+                sns_email = st.text_input(
+                    "📧 Subscribe Email to AWS SNS Alerts",
+                    placeholder="you@example.com",
+                    key="sns_sub_email",
+                )
+                if st.button("🔔 Subscribe to SNS Alerts", use_container_width=True):
+                    if sns_email.strip():
+                        try:
+                            sub_arn = subscribe_email_to_sns(sns_email.strip())
+                            st.success(f"Confirmation email sent! ({sub_arn})")
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(f"SNS error: {exc}")
+                st.divider()
                 runs = list_runs_from_dynamodb(limit=8)
                 if not runs:
                     st.caption("No past runs logged in DynamoDB yet.")

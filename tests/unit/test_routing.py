@@ -279,6 +279,60 @@ def test_bedrock_converse_chat_model_with_mock():
     fake_brt.converse.assert_called_once()
 
 
+def test_huggingface_llm_dataset_sns_and_cloudwatch_with_mocks(tmp_path: Path):
+    from unittest.mock import MagicMock
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from agent.llm import HuggingFaceChatModel, create_groq_llm
+    from tools.aws_tools import publish_cloudwatch_metrics, publish_sns_notification
+    from tools.hf_tools import export_run_to_hf_dataset
+
+    # 1. HuggingFaceChatModel
+    hf_llm = create_groq_llm(model="hf/Qwen/Qwen2.5-Coder-32B-Instruct", api_key="hf_fake")
+    assert isinstance(hf_llm, HuggingFaceChatModel)
+    fake_http = MagicMock()
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {"choices": [{"message": {"content": '{"fixed": true}'}}]}
+    fake_http.post.return_value = fake_resp
+    hf_llm.client = fake_http
+    out = hf_llm.invoke([SystemMessage(content="sys"), HumanMessage(content="fix")])
+    assert out.content == '{"fixed": true}'
+
+    # 2. Hugging Face Dataset exporter
+    values = {
+        "issue": IssueInput(title="Off by one", body="desc", repo_path=tmp_path),
+        "status": AgentStatus.COMMITTED,
+        "iteration": 1,
+    }
+    ds_url = export_run_to_hf_dataset(
+        "run-hf-1",
+        values,
+        dataset_repo="MF180/bugfix-agent-benchmarks",
+        hf_token="hf_fake",
+        http_client=fake_http,
+    )
+    assert ds_url == "https://huggingface.co/datasets/MF180/bugfix-agent-benchmarks"
+
+    # 3. AWS SNS + CloudWatch
+    fake_sns = MagicMock()
+    assert (
+        publish_sns_notification(
+            "run-hf-1",
+            values,
+            topic_arn="arn:aws:sns:us-east-1:123456789012:BugFixAgentAlerts",
+            sns_client=fake_sns,
+        )
+        is True
+    )
+    fake_sns.publish.assert_called_once()
+
+    fake_cw = MagicMock()
+    assert publish_cloudwatch_metrics(values, elapsed_s=3.5, cw_client=fake_cw) is True
+    fake_cw.put_metric_data.assert_called_once()
+
+
 def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
     import io
     import shutil

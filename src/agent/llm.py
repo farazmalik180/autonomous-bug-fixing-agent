@@ -35,6 +35,8 @@ AVAILABLE_GROQ_MODELS = (
     "openai/gpt-oss-120b",
     "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
+    "hf/Qwen/Qwen2.5-Coder-32B-Instruct",
+    "hf/Qwen/Qwen2.5-72B-Instruct",
     "bedrock/amazon.nova-micro-v1:0",
     "bedrock/amazon.nova-lite-v1:0",
     "bedrock/mistral.mistral-7b-instruct-v0:2",
@@ -190,14 +192,90 @@ class BedrockConverseChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=out_text))])
 
 
+class HuggingFaceChatModel(BaseChatModel):
+    """LangChain `BaseChatModel` adapter for Hugging Face Inference Router (`router.huggingface.co`)."""
+
+    model_id: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+    api_key: str = ""
+    temperature: float = 0.0
+    max_tokens: int = 2048
+    client: Any | None = None
+
+    @property
+    def _llm_type(self) -> str:
+        return "huggingface-router"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        import httpx
+
+        token = (
+            self.api_key
+            or os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGINGFACE_TOKEN")
+            or ""
+        ).strip()
+        if not token:
+            raise RuntimeError("HF_TOKEN is not set. Add HF_TOKEN=hf_... to .env to use `hf/...` models.")
+
+        oa_msgs: list[dict[str, str]] = []
+        for m in messages:
+            text = m.content if isinstance(m.content, str) else json.dumps(m.content)
+            if isinstance(m, SystemMessage):
+                oa_msgs.append({"role": "system", "content": text})
+            elif isinstance(m, AIMessage):
+                oa_msgs.append({"role": "assistant", "content": text})
+            else:
+                oa_msgs.append({"role": "user", "content": text})
+
+        payload = {
+            "model": self.model_id,
+            "messages": oa_msgs,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+        }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        url = "https://router.huggingface.co/v1/chat/completions"
+        if self.client is not None:
+            resp = self.client.post(url, headers=headers, json=payload)
+        else:
+            with httpx.Client(timeout=45.0) as http_client:
+                resp = http_client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        out_text = data["choices"][0]["message"]["content"]
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=out_text))])
+
+
 def create_groq_llm(
     model: str | None = None,
     api_key: str | None = None,
     temperature: float = 0.0,
     max_tokens: int = 2048,
 ) -> BaseChatModel:
-    """Instantiate `ChatGroq` or `BedrockConverseChatModel` (when model starts with `bedrock/`)."""
+    """Instantiate `ChatGroq`, `HuggingFaceChatModel` (`hf/...`), or `BedrockConverseChatModel` (`bedrock/...`)."""
     resolved_model = resolve_groq_model(model)
+    if resolved_model.startswith("hf/"):
+        hf_id = resolved_model.split("hf/", 1)[1]
+        hf_key = (
+            os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGINGFACE_TOKEN")
+            or api_key
+            or ""
+        ).strip()
+        return HuggingFaceChatModel(
+            model_id=hf_id,
+            api_key=hf_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
     if resolved_model.startswith("bedrock/"):
         bedrock_id = resolved_model.split("bedrock/", 1)[1]
         region = (

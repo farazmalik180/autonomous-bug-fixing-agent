@@ -23,14 +23,17 @@ class CloudArchiveResult:
     s3_pdf_url: str | None = None
     s3_zip_url: str | None = None
     dynamodb_saved: bool = False
+    sns_published: bool = False
+    cloudwatch_published: bool = False
     error: str | None = None
 
 
 def is_aws_configured() -> bool:
-    """Return True if an S3 bucket or DynamoDB table is configured in the environment."""
+    """Return True if an S3 bucket, DynamoDB table, or SNS topic is configured in the environment."""
     return bool(
         os.environ.get("AWS_S3_BUCKET", "").strip()
         or os.environ.get("AWS_DYNAMODB_TABLE", "").strip()
+        or os.environ.get("AWS_SNS_TOPIC_ARN", "").strip()
     )
 
 
@@ -159,13 +162,126 @@ def list_runs_from_dynamodb(
         return []
 
 
+def publish_sns_notification(
+    run_id: str,
+    values: dict[str, Any],
+    *,
+    s3_pdf_url: str | None = None,
+    topic_arn: str | None = None,
+    sns_client: Any | None = None,
+) -> bool:
+    """Publish an email/alert notification to Amazon SNS (`BugFixAgentAlerts`) when a run finishes or pauses."""
+    target_arn = (topic_arn or os.environ.get("AWS_SNS_TOPIC_ARN") or "").strip()
+    if not target_arn:
+        return False
+
+    try:
+        if sns_client is None:
+            import boto3  # type: ignore[import-untyped]
+
+            sns_client = boto3.client("sns", region_name=_aws_region())
+
+        issue = values.get("issue")
+        repo_ctx = values.get("repo")
+        findings = getattr(repo_ctx, "findings", []) if repo_ctx else []
+        status = str(values.get("status", "unknown"))
+        title = str(getattr(issue, "title", "Repository Scan"))
+
+        lines = [
+            f"Autonomous Bug-Fixing Agent Run: {run_id}",
+            f"Status: {status.upper()}",
+            f"Issue: {title}",
+            f"Issues Discovered: {len(findings)}",
+            f"Fix Iterations: {values.get('iteration', 0)} / 8",
+        ]
+        if s3_pdf_url:
+            lines.append(f"PDF Report (S3): {s3_pdf_url}")
+        lines.append("Live Dashboard: https://d3gctx9v0f6g4u.cloudfront.net")
+
+        sns_client.publish(
+            TopicArn=target_arn,
+            Subject=f"[BugFix Agent] {status.upper()}: {title[:60]}",
+            Message="\n".join(lines),
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("SNS publish failed: %s", exc)
+        return False
+
+
+def subscribe_email_to_sns(
+    email: str,
+    *,
+    topic_arn: str | None = None,
+    sns_client: Any | None = None,
+) -> str:
+    """Subscribe an email address to the Amazon SNS alert topic (`BugFixAgentAlerts`)."""
+    target_arn = (topic_arn or os.environ.get("AWS_SNS_TOPIC_ARN") or "").strip()
+    if not target_arn:
+        raise RuntimeError("AWS_SNS_TOPIC_ARN is not configured.")
+    if sns_client is None:
+        import boto3  # type: ignore[import-untyped]
+
+        sns_client = boto3.client("sns", region_name=_aws_region())
+
+    resp = sns_client.subscribe(
+        TopicArn=target_arn,
+        Protocol="email",
+        Endpoint=email.strip(),
+    )
+    return str(resp.get("SubscriptionArn") or "pending confirmation")
+
+
+def publish_cloudwatch_metrics(
+    values: dict[str, Any],
+    *,
+    elapsed_s: float = 0.0,
+    namespace: str = "AutonomousBugFixingAgent",
+    cw_client: Any | None = None,
+) -> bool:
+    """Publish operational metrics (`BugsDetected`, `FixIterations`, `RunDurationSeconds`) to Amazon CloudWatch."""
+    try:
+        if cw_client is None:
+            import boto3  # type: ignore[import-untyped]
+
+            cw_client = boto3.client("cloudwatch", region_name=_aws_region())
+
+        repo_ctx = values.get("repo")
+        findings = getattr(repo_ctx, "findings", []) if repo_ctx else []
+        iterations = int(values.get("iteration", 0))
+
+        metric_data = [
+            {
+                "MetricName": "BugsDetected",
+                "Value": float(len(findings)),
+                "Unit": "Count",
+            },
+            {
+                "MetricName": "FixIterations",
+                "Value": float(iterations),
+                "Unit": "Count",
+            },
+            {
+                "MetricName": "RunDurationSeconds",
+                "Value": float(max(0.0, elapsed_s)),
+                "Unit": "Seconds",
+            },
+        ]
+        cw_client.put_metric_data(Namespace=namespace, MetricData=metric_data)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("CloudWatch put_metric_data failed: %s", exc)
+        return False
+
+
 def archive_run_to_aws(
     run_id: str,
     values: dict[str, Any],
     pdf_bytes: bytes | None = None,
     zip_bytes: bytes | None = None,
+    elapsed_s: float = 0.0,
 ) -> CloudArchiveResult:
-    """One-stop helper: upload PDF & ZIP to S3 (if set) and log run metadata to DynamoDB (if set)."""
+    """One-stop helper: upload PDF & ZIP to S3, log run to DynamoDB, publish CloudWatch metrics & SNS alert."""
     if not is_aws_configured():
         return CloudArchiveResult()
 
@@ -190,12 +306,16 @@ def archive_run_to_aws(
             s3_pdf_url=pdf_url,
             s3_zip_url=zip_url,
         )
+        cw_ok = publish_cloudwatch_metrics(values, elapsed_s=elapsed_s)
+        sns_ok = publish_sns_notification(run_id, values, s3_pdf_url=pdf_url)
         return CloudArchiveResult(
             s3_bucket=bucket,
             s3_pdf_key=pdf_key if pdf_url else None,
             s3_pdf_url=pdf_url,
             s3_zip_url=zip_url,
             dynamodb_saved=ddb_ok,
+            sns_published=sns_ok,
+            cloudwatch_published=cw_ok,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("AWS archive failed: %s", exc)
