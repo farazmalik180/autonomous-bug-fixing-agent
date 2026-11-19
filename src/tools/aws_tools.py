@@ -183,24 +183,83 @@ def publish_sns_notification(
 
         issue = values.get("issue")
         repo_ctx = values.get("repo")
+        repro = values.get("repro_test")
+        attempts = values.get("attempts") or []
         findings = getattr(repo_ctx, "findings", []) if repo_ctx else []
         status = str(values.get("status", "unknown"))
         title = str(getattr(issue, "title", "Repository Scan"))
 
         lines = [
-            f"Autonomous Bug-Fixing Agent Run: {run_id}",
-            f"Status: {status.upper()}",
-            f"Issue: {title}",
+            "================================================================",
+            "AUTONOMOUS BUG-FIXING AGENT — FULL DIAGNOSTIC & FIX REPORT",
+            "================================================================",
+            f"Run ID:            {run_id}",
+            f"Status:            {status.upper()}",
+            f"Primary Issue:     {title}",
             f"Issues Discovered: {len(findings)}",
-            f"Fix Iterations: {values.get('iteration', 0)} / 8",
+            f"Fix Iterations:    {values.get('iteration', 0)} / 8",
         ]
         if s3_pdf_url:
-            lines.append(f"PDF Report (S3): {s3_pdf_url}")
-        lines.append("Live Dashboard: https://d3gctx9v0f6g4u.cloudfront.net")
+            lines.extend(
+                [
+                    "",
+                    "📄 DOWNLOAD PRINTABLE PDF REPORT (Amazon S3 7-Day Link):",
+                    s3_pdf_url,
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "----------------------------------------------------------------",
+                f"1. REPOSITORY ISSUES AUDIT ({len(findings)} ISSUE(S) FOUND)",
+                "----------------------------------------------------------------",
+            ]
+        )
+        for idx, f in enumerate(findings, start=1):
+            lines.append(f"#{idx} [{f.severity.upper()}] {f.file_path} — {f.title}")
+            lines.append(f"   Details: {f.description}")
+            if f.suggested_fix:
+                lines.append(f"   Recommended Fix: {f.suggested_fix}")
+            lines.append("")
+
+        if repro:
+            lines.extend(
+                [
+                    "----------------------------------------------------------------",
+                    f"2. REPRODUCTION TEST ({repro.path})",
+                    "----------------------------------------------------------------",
+                    repro.content.strip(),
+                    "",
+                ]
+            )
+
+        if attempts:
+            last = attempts[-1]
+            diff_text = "\n".join(p.unified_diff for p in last.patches)
+            lines.extend(
+                [
+                    "----------------------------------------------------------------",
+                    f"3. VERIFIED CODE FIX (Iteration {last.iteration})",
+                    "----------------------------------------------------------------",
+                    f"Rationale: {last.rationale}",
+                    "",
+                    diff_text.strip(),
+                    "",
+                ]
+            )
+
+        lines.extend(
+            [
+                "================================================================",
+                "Live CloudFront HTTPS Dashboard: https://d3gctx9v0f6g4u.cloudfront.net",
+                "Hugging Face Dataset: https://huggingface.co/datasets/MF180/bugfix-agent-benchmarks",
+                "================================================================",
+            ]
+        )
 
         sns_client.publish(
             TopicArn=target_arn,
-            Subject=f"[BugFix Agent] {status.upper()}: {title[:60]}",
+            Subject=f"[BugFix Agent Report] {status.upper()}: {title[:55]}",
             Message="\n".join(lines),
         )
         return True
