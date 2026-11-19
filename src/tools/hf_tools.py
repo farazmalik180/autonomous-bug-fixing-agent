@@ -16,12 +16,15 @@ from typing import Any
 
 import httpx
 
+from agent.llm import load_dotenv_into_environ
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_HF_DATASET_REPO = "MF180/bugfix-agent-benchmarks"
 
 
 def default_hf_token() -> str:
+    load_dotenv_into_environ()
     return (
         os.environ.get("HF_TOKEN")
         or os.environ.get("HUGGINGFACE_TOKEN")
