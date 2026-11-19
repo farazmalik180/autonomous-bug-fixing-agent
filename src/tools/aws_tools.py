@@ -11,9 +11,16 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+from agent.llm import load_dotenv_into_environ
+
 logger = logging.getLogger(__name__)
+
+DEFAULT_S3_BUCKET = "bugfix-agent-reports-706999906997-us-east-1"
+DEFAULT_DYNAMODB_TABLE = "BugFixAgentRuns"
+DEFAULT_SNS_TOPIC_ARN = "arn:aws:sns:us-east-1:706999906997:BugFixAgentAlerts"
 
 
 @dataclass(frozen=True)
@@ -29,12 +36,16 @@ class CloudArchiveResult:
 
 
 def is_aws_configured() -> bool:
-    """Return True if an S3 bucket, DynamoDB table, or SNS topic is configured in the environment."""
-    return bool(
+    """Return True if AWS credentials or cloud resource env vars are available."""
+    load_dotenv_into_environ()
+    has_env = bool(
         os.environ.get("AWS_S3_BUCKET", "").strip()
         or os.environ.get("AWS_DYNAMODB_TABLE", "").strip()
         or os.environ.get("AWS_SNS_TOPIC_ARN", "").strip()
+        or os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
     )
+    has_creds_file = (Path.home() / ".aws" / "credentials").is_file()
+    return has_env or has_creds_file
 
 
 def _aws_region() -> str:
@@ -55,7 +66,8 @@ def upload_bytes_to_s3(
     s3_client: Any | None = None,
 ) -> str | None:
     """Upload raw bytes to Amazon S3 and return a 7-day pre-signed download URL."""
-    target_bucket = (bucket or os.environ.get("AWS_S3_BUCKET") or "").strip()
+    load_dotenv_into_environ()
+    target_bucket = (bucket or os.environ.get("AWS_S3_BUCKET") or DEFAULT_S3_BUCKET).strip()
     if not target_bucket:
         return None
 
@@ -88,7 +100,8 @@ def save_run_to_dynamodb(
     ddb_client: Any | None = None,
 ) -> bool:
     """Persist a summary record of an agent run into Amazon DynamoDB (`BugFixAgentRuns`)."""
-    target_table = (table_name or os.environ.get("AWS_DYNAMODB_TABLE") or "").strip()
+    load_dotenv_into_environ()
+    target_table = (table_name or os.environ.get("AWS_DYNAMODB_TABLE") or DEFAULT_DYNAMODB_TABLE).strip()
     if not target_table:
         return False
 
@@ -130,7 +143,8 @@ def list_runs_from_dynamodb(
     ddb_client: Any | None = None,
 ) -> list[dict[str, str]]:
     """Fetch recent agent runs from Amazon DynamoDB, sorted newest-first."""
-    target_table = (table_name or os.environ.get("AWS_DYNAMODB_TABLE") or "").strip()
+    load_dotenv_into_environ()
+    target_table = (table_name or os.environ.get("AWS_DYNAMODB_TABLE") or DEFAULT_DYNAMODB_TABLE).strip()
     if not target_table:
         return []
 
@@ -171,7 +185,8 @@ def publish_sns_notification(
     sns_client: Any | None = None,
 ) -> bool:
     """Publish an email/alert notification to Amazon SNS (`BugFixAgentAlerts`) when a run finishes or pauses."""
-    target_arn = (topic_arn or os.environ.get("AWS_SNS_TOPIC_ARN") or "").strip()
+    load_dotenv_into_environ()
+    target_arn = (topic_arn or os.environ.get("AWS_SNS_TOPIC_ARN") or DEFAULT_SNS_TOPIC_ARN).strip()
     if not target_arn:
         return False
 
@@ -275,7 +290,8 @@ def subscribe_email_to_sns(
     sns_client: Any | None = None,
 ) -> str:
     """Subscribe an email address to the Amazon SNS alert topic (`BugFixAgentAlerts`)."""
-    target_arn = (topic_arn or os.environ.get("AWS_SNS_TOPIC_ARN") or "").strip()
+    load_dotenv_into_environ()
+    target_arn = (topic_arn or os.environ.get("AWS_SNS_TOPIC_ARN") or DEFAULT_SNS_TOPIC_ARN).strip()
     if not target_arn:
         raise RuntimeError("AWS_SNS_TOPIC_ARN is not configured.")
     if sns_client is None:
@@ -344,7 +360,7 @@ def archive_run_to_aws(
     if not is_aws_configured():
         return CloudArchiveResult()
 
-    bucket = os.environ.get("AWS_S3_BUCKET", "").strip() or None
+    bucket = (os.environ.get("AWS_S3_BUCKET") or DEFAULT_S3_BUCKET).strip() or None
     pdf_key = f"reports/{run_id}/bugfix-report.pdf"
     zip_key = f"reports/{run_id}/fixed-repository.zip"
     pdf_url: str | None = None

@@ -26,13 +26,16 @@ if _SRC_DIR not in sys.path:
 
 # Hot-reload guard for Streamlit Community Cloud: if an older commit's modules are cached
 # in `sys.modules` across a live GitHub push, reload them in dependency order.
-if "agent.state" in sys.modules and not hasattr(sys.modules["agent.state"], "RepoFinding"):
+_APP_VERSION = "v5"
+if getattr(sys.modules.get("agent.state"), "_APP_VERSION", None) != _APP_VERSION:
     for _mod in (
         "agent.state",
         "tools.file_tools",
         "tools.git_tools",
         "agent.prompts",
         "agent.llm",
+        "tools.aws_tools",
+        "tools.hf_tools",
         "agent.nodes",
         "agent.graph",
         "ui.mock_graph",
@@ -40,6 +43,8 @@ if "agent.state" in sys.modules and not hasattr(sys.modules["agent.state"], "Rep
     ):
         if _mod in sys.modules:
             importlib.reload(sys.modules[_mod])
+    if "agent.state" in sys.modules:
+        setattr(sys.modules["agent.state"], "_APP_VERSION", _APP_VERSION)
 
 import streamlit as st
 from langgraph.types import Command
@@ -300,7 +305,11 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
             mime="application/pdf",
             key=f"pdf-{key_suffix}",
         )
-        if is_aws_configured() and st.session_state.get("thread_id"):
+        if (
+            is_aws_configured()
+            and st.session_state.get("thread_id")
+            and st.session_state.get("run_mode") == "live"
+        ):
             archive_key = f"aws_archive_{st.session_state.thread_id}_{values.get('status')}"
             if archive_key not in st.session_state:
                 zip_bytes = None
@@ -329,7 +338,11 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
                 st.caption("📊 Telemetry published to Amazon CloudWatch (`AutonomousBugFixingAgent`)")
             if arc.sns_published:
                 st.caption("📧 Alert notification sent via Amazon SNS (`BugFixAgentAlerts`)")
-        if default_hf_token() and st.session_state.get("thread_id"):
+        if (
+            default_hf_token()
+            and st.session_state.get("thread_id")
+            and st.session_state.get("run_mode") == "live"
+        ):
             hf_key = f"hf_dataset_{st.session_state.thread_id}_{values.get('status')}"
             if hf_key not in st.session_state:
                 st.session_state[hf_key] = export_run_to_hf_dataset(
