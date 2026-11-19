@@ -59,6 +59,10 @@ The full architecture specification is in [SPEC.md](SPEC.md).
   - `LocalSandbox` ([src/sandbox/local_runner.py](src/sandbox/local_runner.py)): Subprocess fallback for environments without a Docker daemon (e.g., Streamlit Community Cloud), with environment secret scrubbing and process-tree timeout kills.
 - **Path-Jailed Workspace ([src/tools/file_tools.py](src/tools/file_tools.py)):** Works on an isolated copy (`base/` + `work/`) so your target repository is never modified until approval. Supports built-in sample repos, local folders, or shallow-cloning any GitHub repository URL.
 - **Single-URL Repository Audit & PDF Report ([src/ui/streamlit_app.py](src/ui/streamlit_app.py), [src/ui/report_pdf.py](src/ui/report_pdf.py)):** Paste a single GitHub repository URL to scan all files for bugs/defects, view a side-by-side Before/After diff and live telemetry bar, and download a printable PDF audit & fix report.
+- **Multi-Cloud LLM & Cloud Archiving ([src/agent/llm.py](src/agent/llm.py), [src/tools/aws_tools.py](src/tools/aws_tools.py), [src/tools/hf_tools.py](src/tools/hf_tools.py)):**
+  - **3-Provider LLM Engine:** Switch seamlessly between **Groq**, **Hugging Face Inference Router (`hf/Qwen/...`)**, and **Amazon Bedrock (`bedrock/...`)**.
+  - **AWS Cloud Stack:** Archives PDF reports & fixed `.zip` bundles to **Amazon S3** with 7-day pre-signed links, logs run history to **Amazon DynamoDB**, streams custom metrics to **Amazon CloudWatch**, sends full inline reports + S3 PDF download links via **Amazon SNS Email Alerts**, and accepts GitHub webhooks via **AWS Lambda**.
+  - **Hugging Face Dataset Publisher:** Automatically exports SWE-Bench-style JSON run records to [`MF180/bugfix-agent-benchmarks`](https://huggingface.co/datasets/MF180/bugfix-agent-benchmarks).
 - **Human-in-the-Loop Gate ([src/agent/nodes.py](src/agent/nodes.py)):** `commit_and_pr` is reachable **only** after `human_approval` resumes from `langgraph.types.interrupt()`.
 
 ## Project Layout
@@ -67,12 +71,12 @@ The full architecture specification is in [SPEC.md](SPEC.md).
 src/
   agent/     state.py · llm.py · prompts.py · nodes.py · graph.py
   sandbox/   base.py · docker_runner.py · local_runner.py · factory.py · Dockerfile
-  tools/     file_tools.py · git_tools.py
+  tools/     file_tools.py · git_tools.py · aws_tools.py · hf_tools.py
   ui/        streamlit_app.py · mock_graph.py · report_pdf.py
 tests/
   unit/      test_state.py · test_docker_runner.py · test_routing.py · test_mock_graph.py · test_streamlit_app.py
   fixtures/  buggy_repo/
-deploy/      cloudshell_deploy.sh · ec2_userdata.sh
+deploy/      cloudshell_deploy.sh · ec2_userdata.sh · aws_free_tier_stack.sh · aws_https_cloudfront.sh · claim_all_aws_credits.sh · lambda_webhook.py · Caddyfile
 Dockerfile · docker-compose.yml · SPEC.md · requirements.txt · pyproject.toml
 ```
 
