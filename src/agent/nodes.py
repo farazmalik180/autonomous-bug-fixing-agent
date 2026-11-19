@@ -58,6 +58,7 @@ from tools.git_tools import apply_workspace_to_repo
 logger = logging.getLogger(__name__)
 
 MAX_RELEVANT_FILES = 4
+MAX_SCAN_BATCHES = 3
 MAX_FILE_SNIPPET_CHARS = 2200
 
 
@@ -148,32 +149,50 @@ def inspect_repo(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     if wants_auto:
         try:
             llm = _get_llm(config)
-            files_block = "\n\n".join(
-                f"### File: `{p}`\n```python\n{src}\n```" for p, src in relevant.items()
-            )
-            detected = invoke_structured(
-                llm,
-                DetectedBugProposal,
-                DETECT_BUG_SYSTEM_PROMPT,
-                f"Repository Tree:\n```\n{tree}\n```\n\nSource Files:\n{files_block}",
-            )
-            updates["issue"] = issue.model_copy(
-                update={"title": detected.title, "body": detected.body}
-            )
-            if detected.file_path in py_files and detected.file_path not in relevant:
-                relevant[detected.file_path] = ws.read(
-                    detected.file_path, max_chars=MAX_FILE_SNIPPET_CHARS
+            all_findings: list[RepoFinding] = []
+            primary_detected: DetectedBugProposal | None = None
+
+            # Scan the repository in batches of MAX_RELEVANT_FILES (up to MAX_SCAN_BATCHES = 12 files)
+            # so the entire repository is audited without exceeding per-call 8K TPM limits.
+            scan_candidates = ranked[: MAX_RELEVANT_FILES * MAX_SCAN_BATCHES]
+            for b_start in range(0, len(scan_candidates), MAX_RELEVANT_FILES):
+                batch_paths = scan_candidates[b_start : b_start + MAX_RELEVANT_FILES]
+                batch_files = {
+                    p: ws.read(p, max_chars=MAX_FILE_SNIPPET_CHARS) for p in batch_paths
+                }
+                files_block = "\n\n".join(
+                    f"### File: `{p}`\n```python\n{src}\n```" for p, src in batch_files.items()
                 )
-            findings = list(detected.findings) if detected.findings else [
-                RepoFinding(
-                    severity="High",
-                    file_path=detected.file_path,
-                    title=detected.title,
-                    description=detected.body,
-                    suggested_fix="Apply automated search/replace fix verified by pytest.",
+                detected = invoke_structured(
+                    llm,
+                    DetectedBugProposal,
+                    DETECT_BUG_SYSTEM_PROMPT,
+                    f"Repository Tree:\n```\n{tree}\n```\n\nSource Files (Batch {b_start // MAX_RELEVANT_FILES + 1}):\n{files_block}",
                 )
-            ]
-            repo = repo.model_copy(update={"relevant_files": relevant, "findings": findings})
+                if primary_detected is None:
+                    primary_detected = detected
+                if detected.findings:
+                    all_findings.extend(detected.findings)
+                else:
+                    all_findings.append(
+                        RepoFinding(
+                            severity="High",
+                            file_path=detected.file_path,
+                            title=detected.title,
+                            description=detected.body,
+                            suggested_fix="Apply automated search/replace fix verified by pytest.",
+                        )
+                    )
+
+            if primary_detected is not None:
+                updates["issue"] = issue.model_copy(
+                    update={"title": primary_detected.title, "body": primary_detected.body}
+                )
+                if primary_detected.file_path in py_files and primary_detected.file_path not in relevant:
+                    relevant[primary_detected.file_path] = ws.read(
+                        primary_detected.file_path, max_chars=MAX_FILE_SNIPPET_CHARS
+                    )
+            repo = repo.model_copy(update={"relevant_files": relevant, "findings": all_findings})
             updates["repo"] = repo
         except Exception as exc:  # noqa: BLE001
             logger.warning("Auto-detect bug fallback skipped: %s", exc)
