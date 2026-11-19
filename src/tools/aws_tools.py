@@ -36,16 +36,9 @@ class CloudArchiveResult:
 
 
 def is_aws_configured() -> bool:
-    """Return True if AWS credentials or cloud resource env vars are available."""
+    """Return True so EC2 IAM Instance Roles, env vars, and local ~/.aws credentials all work."""
     load_dotenv_into_environ()
-    has_env = bool(
-        os.environ.get("AWS_S3_BUCKET", "").strip()
-        or os.environ.get("AWS_DYNAMODB_TABLE", "").strip()
-        or os.environ.get("AWS_SNS_TOPIC_ARN", "").strip()
-        or os.environ.get("AWS_ACCESS_KEY_ID", "").strip()
-    )
-    has_creds_file = (Path.home() / ".aws" / "credentials").is_file()
-    return has_env or has_creds_file
+    return True
 
 
 def _aws_region() -> str:

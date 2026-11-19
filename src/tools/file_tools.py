@@ -305,7 +305,7 @@ class Workspace:
             if rel not in pending:
                 if not full.is_file():
                     raise EditError(f"{edit.path}: file does not exist (edits can only modify files)")
-                pending[rel] = full.read_text(encoding="utf-8", newline="")
+                pending[rel] = full.read_bytes().decode("utf-8", errors="replace")
             text = pending[rel]
 
             search, replace = edit.search, edit.replace
