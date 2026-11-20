@@ -26,7 +26,7 @@ if _SRC_DIR not in sys.path:
 
 # Hot-reload guard for Streamlit Community Cloud: if an older commit's modules are cached
 # in `sys.modules` across a live GitHub push, reload them in dependency order.
-_APP_VERSION = "v5"
+_APP_VERSION = "v6"
 if getattr(sys.modules.get("agent.state"), "_APP_VERSION", None) != _APP_VERSION:
     for _mod in (
         "agent.state",
@@ -63,6 +63,7 @@ from tools.aws_tools import (
     is_aws_configured,
     list_runs_from_dynamodb,
     subscribe_email_to_sns,
+    synthesize_polly_audio,
 )
 from tools.file_tools import (
     Workspace,
@@ -338,6 +339,13 @@ def _render_report_download(values: dict[str, Any], key_suffix: str) -> None:
                 st.caption("📊 Telemetry published to Amazon CloudWatch (`AutonomousBugFixingAgent`)")
             if arc.sns_published:
                 st.caption("📧 Alert notification sent via Amazon SNS (`BugFixAgentAlerts`)")
+            polly_key = f"polly_audio_{st.session_state.thread_id}_{values.get('status')}"
+            if polly_key not in st.session_state:
+                st.session_state[polly_key] = synthesize_polly_audio(values)
+            polly_bytes = st.session_state[polly_key]
+            if polly_bytes:
+                st.caption("🔊 **Spoken Audio Executive Summary (Amazon Polly Neural TTS):**")
+                st.audio(polly_bytes, format="audio/mp3")
         if (
             default_hf_token()
             and st.session_state.get("thread_id")

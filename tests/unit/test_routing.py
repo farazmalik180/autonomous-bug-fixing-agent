@@ -332,6 +332,19 @@ def test_huggingface_llm_dataset_sns_and_cloudwatch_with_mocks(tmp_path: Path):
     assert publish_cloudwatch_metrics(values, elapsed_s=3.5, cw_client=fake_cw) is True
     fake_cw.put_metric_data.assert_called_once()
 
+    # 4. Amazon Polly TTS audio summary
+    import io
+
+    from tools.aws_tools import build_voice_summary_script, synthesize_polly_audio
+
+    script = build_voice_summary_script(values)
+    assert "Off by one" in script
+    fake_polly = MagicMock()
+    fake_polly.synthesize_speech.return_value = {"AudioStream": io.BytesIO(b"ID3-fake-mp3-bytes")}
+    mp3 = synthesize_polly_audio(values, polly_client=fake_polly)
+    assert mp3 == b"ID3-fake-mp3-bytes"
+    fake_polly.synthesize_speech.assert_called_once()
+
 
 def test_create_repo_from_uploads_handles_zip_and_rejects_zip_slip():
     import io

@@ -342,6 +342,81 @@ def publish_cloudwatch_metrics(
         return False
 
 
+def build_voice_summary_script(values: dict[str, Any]) -> str:
+    """Create a natural, concise spoken executive briefing of the repository audit and fix."""
+    issue = values.get("issue")
+    repo_ctx = values.get("repo")
+    attempts = values.get("attempts") or []
+    findings = list(getattr(repo_ctx, "findings", []) or []) if repo_ctx else []
+    status = str(values.get("status", "inspected")).replace("_", " ")
+
+    parts = [
+        f"Autonomous Bug-Fixing Agent executive briefing. Current run status is {status}.",
+    ]
+    if findings:
+        parts.append(f"The repository scan discovered {len(findings)} issue{'s' if len(findings) != 1 else ''}.")
+        for idx, f in enumerate(findings[:3], start=1):
+            parts.append(
+                f"Issue {idx}, {f.severity} severity in {f.file_path}: {f.title}. "
+                f"Recommended fix: {f.suggested_fix or f.description[:140]}."
+            )
+    elif issue:
+        parts.append(f"Primary reported issue: {issue.title}. {issue.body[:180]}.")
+
+    if attempts:
+        last = attempts[-1]
+        passed = bool(last.result and last.result.passed)
+        verdict = "passed all sandbox tests" if passed else "was evaluated in the sandbox"
+        parts.append(
+            f"Fix iteration {last.iteration} {verdict}. Rationale: {last.rationale[:180]}."
+        )
+
+    script = " ".join(parts)
+    # Clean backticks and markdown symbols for smooth TTS pronunciation
+    for ch in ("`", "*", "#", "_"):
+        script = script.replace(ch, "")
+    return script[:1800]
+
+
+def synthesize_polly_audio(
+    values: dict[str, Any],
+    *,
+    voice_id: str = "Matthew",
+    polly_client: Any | None = None,
+) -> bytes | None:
+    """Synthesize an MP3 voice briefing of the bug report using Amazon Polly."""
+    try:
+        load_dotenv_into_environ()
+        if polly_client is None:
+            import boto3  # type: ignore[import-untyped]
+
+            polly_client = boto3.client("polly", region_name=_aws_region())
+
+        script = build_voice_summary_script(values)
+        try:
+            resp = polly_client.synthesize_speech(
+                Text=script,
+                OutputFormat="mp3",
+                VoiceId=voice_id,
+                Engine="neural",
+            )
+        except Exception:  # noqa: BLE001
+            resp = polly_client.synthesize_speech(
+                Text=script,
+                OutputFormat="mp3",
+                VoiceId=voice_id,
+                Engine="standard",
+            )
+        stream = resp.get("AudioStream")
+        if stream is None:
+            return None
+        data: bytes = stream.read()
+        return data if data else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Amazon Polly synthesize_speech failed: %s", exc)
+        return None
+
+
 def archive_run_to_aws(
     run_id: str,
     values: dict[str, Any],
